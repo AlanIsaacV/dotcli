@@ -396,15 +396,6 @@ func (i *Installer) installWithPackageManager(pm string, packages []string, stat
 		return fmt.Errorf("package installation failed: %w\nCommand: %s\nOutput: %s", err, cmd.String(), string(output))
 	}
 
-	// Only show package manager output if there are warnings or important info
-	outputStr := string(output)
-	if strings.Contains(outputStr, "Warning") || strings.Contains(outputStr, "Error") || strings.Contains(outputStr, "already installed") {
-		statusCh <- models.InstallationStatus{
-			Module: moduleName,
-			Status: fmt.Sprintf("Package manager output: %s", strings.TrimSpace(outputStr)),
-		}
-	}
-
 	return nil
 }
 
@@ -423,18 +414,7 @@ func (i *Installer) runInstallScript(module models.ModuleConfig) error {
 	}
 
 	cmd.Dir = module.Path
-	// Capture output to avoid mixing with our status messages
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("script failed: %w\nOutput: %s", err, string(output))
-	}
-
-	// Only show output if there was an error or if it's important
-	if len(output) > 0 {
-		fmt.Printf("Script output for %s:\n%s\n", module.Name, string(output))
-	}
-
-	return nil
+	return cmd.Run()
 }
 
 func (i *Installer) createSymlinks(module models.ModuleConfig) error {
@@ -470,7 +450,7 @@ func (i *Installer) createSymlink(source, dest string) error {
 	return os.Symlink(absSource, dest)
 }
 
-func (i *Installer) CheckDependencies(modules []models.ModuleConfig, selected []string) []string {
+func (i *Installer) GetInstallationOrder(modules []models.ModuleConfig, selected []string) ([]string, error) {
 	moduleMap := make(map[string]models.ModuleConfig)
 	for _, module := range modules {
 		moduleMap[module.Name] = module
@@ -481,22 +461,19 @@ func (i *Installer) CheckDependencies(modules []models.ModuleConfig, selected []
 		selectedMap[name] = true
 	}
 
-	var missing []string
+	// Add missing dependencies
+	var allSelected []string
 	for _, name := range selected {
 		if module, exists := moduleMap[name]; exists {
 			for _, dep := range module.Dependencies {
 				if !selectedMap[dep] {
-					missing = append(missing, dep)
+					allSelected = append(allSelected, dep)
 					selectedMap[dep] = true
 				}
 			}
 		}
 	}
+	allSelected = append(allSelected, selected...)
 
-	return missing
-}
-
-func (i *Installer) GetInstallationOrder(modules []models.ModuleConfig, selected []string) ([]string, error) {
-	allSelected := append(selected, i.CheckDependencies(modules, selected)...)
 	return i.ResolveDependencies(modules, allSelected)
 }

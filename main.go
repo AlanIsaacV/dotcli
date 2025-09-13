@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -15,115 +14,22 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-func printHelp() {
-	fmt.Println("DotCLI - Enhanced Dotfiles Manager")
-	fmt.Println("=================================")
-	fmt.Println()
-	fmt.Println("Usage:")
-	fmt.Println("  dotcli                                     # Interactive module selection")
-	fmt.Println("  dotcli -create <name>                      # Create new module")
-	fmt.Println("  dotcli -create <name> -template <type>     # Create with template")
-	fmt.Println("  dotcli -add <module:source:dest>           # Add dotfile mapping")
-	fmt.Println("  dotcli -import <module:path>               # Import existing file")
-	fmt.Println("  dotcli -list                               # List modules")
-	fmt.Println("  dotcli -templates                          # List templates")
-	fmt.Println("  dotcli -help                               # Show this help")
-	fmt.Println()
-	fmt.Println("Examples:")
-	fmt.Println("  dotcli -create nvim -template editor")
-	fmt.Println("  dotcli -add nvim:dotfiles/init.lua:.config/nvim/init.lua")
-	fmt.Println("  dotcli -import zsh:~/.zshrc")
-	fmt.Println()
-	fmt.Println("Templates: basic, shell, editor, cli-tool")
-}
-
 func main() {
-	var (
-		create     = flag.String("create", "", "Create new module with name")
-		addDotfile = flag.String("add", "", "Add dotfile to existing module (format: module:source:destination)")
-		importFile = flag.String("import", "", "Import existing file to module (format: module:path)")
-		template   = flag.String("template", "basic", "Template to use when creating module")
-		listCmd    = flag.Bool("list", false, "List available modules")
-		templates  = flag.Bool("templates", false, "List available templates")
-		editModule = flag.String("edit", "", "Edit module config in $EDITOR")
-	)
-
-	// Check for help before parsing
-	for _, arg := range os.Args[1:] {
-		if arg == "-help" || arg == "--help" || arg == "-h" {
-			printHelp()
-			return
-		}
-	}
-
-	flag.Parse()
 
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		log.Fatal("Failed to get home directory:", err)
 	}
 
-	dotfilesPath := filepath.Join(homeDir, ".dotfiles")
+	dotfilesPath := filepath.Join(homeDir, "dotfiles")
 
-	// Create dotfiles directory if it doesn't exist
 	if _, err := os.Stat(dotfilesPath); os.IsNotExist(err) {
 		if err := os.MkdirAll(filepath.Join(dotfilesPath, "modules"), 0755); err != nil {
 			log.Fatal("Failed to create dotfiles directory:", err)
 		}
-		fmt.Printf("Created dotfiles directory at %s\n", dotfilesPath)
 	}
 
 	mgr := manager.New(dotfilesPath)
-
-	// Handle commands
-	switch {
-
-	case *create != "":
-		if err := mgr.CreateModule(*create, *template); err != nil {
-			log.Fatal("Failed to create module:", err)
-		}
-		fmt.Printf("✅ Module '%s' created successfully\n", *create)
-		return
-
-	case *addDotfile != "":
-		if err := mgr.AddDotfileFromString(*addDotfile); err != nil {
-			log.Fatal("Failed to add dotfile:", err)
-		}
-		fmt.Println("✅ Dotfile added successfully")
-		return
-
-	case *importFile != "":
-		if err := mgr.ImportDotfileFromString(*importFile); err != nil {
-			log.Fatal("Failed to import file:", err)
-		}
-		fmt.Println("✅ File imported successfully")
-		return
-
-	case *templates:
-		mgr.ListTemplates()
-		return
-
-	case *editModule != "":
-		if err := mgr.EditModule(*editModule); err != nil {
-			log.Fatal("Failed to edit module:", err)
-		}
-		return
-
-	case *listCmd:
-		scanner := scanner.New(dotfilesPath)
-		modules, err := scanner.ScanModules()
-		if err != nil {
-			log.Fatal("Failed to scan modules:", err)
-		}
-
-		fmt.Println("Available modules:")
-		for _, module := range modules {
-			fmt.Printf("  📁 %s - %s\n", module.Name, module.Description)
-		}
-		return
-	}
-
-	// Default: run interactive UI
 	scanner := scanner.New(dotfilesPath)
 	modules, err := scanner.ScanModules()
 	if err != nil {
@@ -131,14 +37,7 @@ func main() {
 	}
 
 	if len(modules) == 0 {
-		fmt.Println("No modules found in", filepath.Join(dotfilesPath, "modules"))
-		fmt.Println()
-		fmt.Println("🚀 Get started:")
-		fmt.Println("  dotcli -create <name>                    # Create basic module")
-		fmt.Println("  dotcli -create <name> -template shell    # Create shell config")
-		fmt.Println("  dotcli -templates                        # Show all templates")
-		fmt.Println("  dotcli -help                             # Show detailed help")
-		return
+		fmt.Println("No modules found. Use 'c' in the interface to create your first module.")
 	}
 
 	model := ui.NewModel(modules, mgr)
@@ -188,7 +87,6 @@ func main() {
 
 				options := models.InstallOptions{
 					ForceReinstall: forceReinstall,
-					SkipInstalled:  false,
 				}
 
 				for _, moduleName := range installOrder {

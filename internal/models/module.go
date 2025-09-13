@@ -24,13 +24,11 @@ type ModuleConfig struct {
 
 type InstallOptions struct {
 	ForceReinstall bool
-	SkipInstalled  bool
 }
 
 type ModuleState struct {
-	Config    ModuleConfig
-	Selected  bool
-	Installed bool
+	Config   ModuleConfig
+	Selected bool
 }
 
 type InstallationStatus struct {

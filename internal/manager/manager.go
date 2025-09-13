@@ -104,11 +104,6 @@ echo "%s setup completed!"
 		}
 	}
 
-	fmt.Printf("📁 Created module: %s\n", modulePath)
-	fmt.Printf("📄 Config: %s/config.yaml\n", modulePath)
-	fmt.Printf("🔧 Script: %s/install.sh\n", modulePath)
-	fmt.Printf("📂 Dotfiles: %s/dotfiles/\n", modulePath)
-
 	return nil
 }
 
@@ -169,9 +164,6 @@ func (m *Manager) AddDotfile(moduleName, source, destination string) error {
 		return fmt.Errorf("failed to write updated config: %w", err)
 	}
 
-	fmt.Printf("Added dotfile mapping to %s:\n", moduleName)
-	fmt.Printf("  %s → %s\n", source, destination)
-
 	return nil
 }
 
@@ -215,41 +207,7 @@ func (m *Manager) ImportDotfile(moduleName, sourcePath string) error {
 		return fmt.Errorf("failed to add to config: %w", err)
 	}
 
-	fmt.Printf("📁 Imported: %s\n", sourcePath)
-	fmt.Printf("📂 To: %s\n", moduleDestPath)
-
 	return nil
-}
-
-func (m *Manager) ImportDotfileFromString(input string) error {
-	parts := strings.Split(input, ":")
-	if len(parts) != 2 {
-		return fmt.Errorf("format should be module:path")
-	}
-
-	moduleName := strings.TrimSpace(parts[0])
-	sourcePath := strings.TrimSpace(parts[1])
-
-	return m.ImportDotfile(moduleName, sourcePath)
-}
-
-func (m *Manager) EditModule(moduleName string) error {
-	modulePath := filepath.Join(m.modulesPath, moduleName)
-	configPath := filepath.Join(modulePath, "config.yaml")
-
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		return fmt.Errorf("module '%s' does not exist", moduleName)
-	}
-
-	editor := os.Getenv("EDITOR")
-	if editor == "" {
-		editor = "nano"
-	}
-
-	fmt.Printf("Opening %s in %s...\n", configPath, editor)
-
-	// Use os.Exec to replace current process with editor
-	return fmt.Errorf("use: %s %s", editor, configPath)
 }
 
 func (m *Manager) copyFile(src, dst string) error {
@@ -337,12 +295,4 @@ func (m *Manager) getTemplate(name string) (Template, error) {
 	}
 
 	return template, nil
-}
-
-func (m *Manager) ListTemplates() {
-	fmt.Println("Available templates:")
-	fmt.Println("  basic     - Basic module template")
-	fmt.Println("  shell     - Shell configuration (zsh)")
-	fmt.Println("  editor    - Editor configuration (neovim)")
-	fmt.Println("  cli-tool  - CLI tool configuration")
 }

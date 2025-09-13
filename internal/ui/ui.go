@@ -28,15 +28,10 @@ type FormData struct {
 	moduleName   string
 	description  string
 	template     string
-	packages     []string
 	dotfilePaths []string
 	currentField int
 	inputValue   string
 }
-
-type installProgressMsg models.InstallationStatus
-type installCompleteMsg struct{}
-type installErrorMsg error
 
 var (
 	titleStyle = lipgloss.NewStyle().
@@ -47,23 +42,17 @@ var (
 	selectedStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#EE6FF8"))
 
-	statusStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#04B575"))
-
-	errorStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FF5F87"))
-
-	helpStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#626262"))
+	statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#04B575"))
+	errorStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5F87"))
+	helpStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#626262"))
 )
 
 func NewModel(modules []models.ModuleConfig, mgr *manager.Manager) Model {
 	moduleStates := make([]models.ModuleState, len(modules))
 	for i, module := range modules {
 		moduleStates[i] = models.ModuleState{
-			Config:    module,
-			Selected:  false,
-			Installed: false,
+			Config:   module,
+			Selected: false,
 		}
 	}
 
@@ -251,7 +240,7 @@ func (m Model) handleCreateSubmit() (tea.Model, tea.Cmd) {
 
 	m.mode = ""
 	m.formData = FormData{}
-	return m, tea.Quit
+	return m, nil
 }
 
 func (m Model) handleAddSubmit() (tea.Model, tea.Cmd) {
@@ -341,20 +330,12 @@ func (m Model) View() string {
 			line += helpStyle.Render(fmt.Sprintf(" (deps: %s)", deps))
 		}
 
-		// Show packages if any
+		// Show packages count
 		if !m.hasNoPackages(module.Config.Packages) {
-			var pkgList []string
-			if len(module.Config.Packages.Brew) > 0 {
-				pkgList = append(pkgList, fmt.Sprintf("brew:%s", strings.Join(module.Config.Packages.Brew, ",")))
-			}
-			if len(module.Config.Packages.Apt) > 0 {
-				pkgList = append(pkgList, fmt.Sprintf("apt:%s", strings.Join(module.Config.Packages.Apt, ",")))
-			}
-			if len(module.Config.Packages.Pacman) > 0 {
-				pkgList = append(pkgList, fmt.Sprintf("pacman:%s", strings.Join(module.Config.Packages.Pacman, ",")))
-			}
-			if len(pkgList) > 0 {
-				line += helpStyle.Render(fmt.Sprintf(" (packages: %s)", strings.Join(pkgList, ", ")))
+			totalPkgs := len(module.Config.Packages.Brew) + len(module.Config.Packages.Apt) +
+				len(module.Config.Packages.Pacman) + len(module.Config.Packages.Yum) + len(module.Config.Packages.Snap)
+			if totalPkgs > 0 {
+				line += helpStyle.Render(fmt.Sprintf(" (%d packages)", totalPkgs))
 			}
 		}
 
