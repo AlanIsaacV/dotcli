@@ -26,26 +26,32 @@ type Model struct {
 	scanner        *scanner.Scanner
 	allModules     []models.ModuleConfig
 	dotfilesPath   string
-	formData       FormData
+	createFormData *CreateFormData
+	editFormData   *EditFormData
+	addFormData    *AddFormData
 }
 
-type FormData struct {
-	moduleName          string
-	description         string
-	dependencies        []string
-	commonPackages      string
-	hasSpecificPackages bool
-	specificPackages    []SpecificPackageForm
-	moduleChoice        string
-	source              string
-	destination         string
-	isEditing           bool
-	editModule          *models.ModuleConfig
+type CreateFormData struct {
+	ModuleName      *string
+	Description     *string
+	Dependencies    *[]string
+	CommonPackages  *string
+	HasSpecific     *bool
+	SpecificName    *string
+	SpecificManager *string
 }
 
-type SpecificPackageForm struct {
-	Name    string
-	Manager string
+type EditFormData struct {
+	ModuleName     string
+	Description    *string
+	Dependencies   *[]string
+	CommonPackages *string
+}
+
+type AddFormData struct {
+	ModuleChoice *string
+	Source       *string
+	Destination  *string
 }
 
 var (
@@ -138,9 +144,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.forceReinstall = !m.forceReinstall
 
 		case "c":
+			m.error = nil
 			return m.createModuleForm()
 
 		case "e":
+			m.error = nil
 			if len(m.modules) > 0 && m.cursor < len(m.modules) {
 				return m.editModuleForm(m.modules[m.cursor].Config)
 			} else if len(m.modules) == 0 {
@@ -148,6 +156,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "a":
+			m.error = nil
 			return m.addDotfileForm()
 
 		case "esc":
@@ -163,9 +172,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) createModuleForm() (tea.Model, tea.Cmd) {
-	m.formData = FormData{
-		isEditing: false,
-	}
+	// Form data variables - these will be directly bound to huh
+	var (
+		moduleName      string
+		description     string
+		dependencies    []string
+		commonPackages  string
+		hasSpecific     bool
+		specificName    string
+		specificManager string
+	)
 
 	// Build list of available modules for dependencies
 	var moduleOptions []huh.Option[string]
@@ -173,6 +189,35 @@ func (m Model) createModuleForm() (tea.Model, tea.Cmd) {
 		moduleOptions = append(moduleOptions, huh.NewOption(module.Config.Name, module.Config.Name))
 	}
 
+	var groups []*huh.Group
+
+	// Basic info group
+	basicGroup := huh.NewGroup(
+		huh.NewInput().
+			Title("Module Name").
+			Description("Enter a unique identifier for your module (e.g., nvim, shell, git)").
+			Value(&moduleName).
+			Validate(func(str string) error {
+				trimmed := strings.TrimSpace(str)
+				if trimmed == "" {
+					return nil // Allow empty during typing
+				}
+				// Check for conflicts with existing modules
+				for _, module := range m.modules {
+					if module.Config.Name == trimmed {
+						return fmt.Errorf("module '%s' already exists", trimmed)
+					}
+				}
+				return nil
+			}),
+
+		huh.NewInput().
+			Title("Description").
+			Description("Brief description of what this module configures (optional)").
+			Value(&description),
+	)
+
+	// Dependencies group
 	var dependencyGroup *huh.Group
 	if len(moduleOptions) > 0 {
 		dependencyGroup = huh.NewGroup(
@@ -180,7 +225,7 @@ func (m Model) createModuleForm() (tea.Model, tea.Cmd) {
 				Title("Dependencies").
 				Description("Select modules that must be installed before this one").
 				Options(moduleOptions...).
-				Value(&m.formData.dependencies),
+				Value(&dependencies),
 		)
 	} else {
 		dependencyGroup = huh.NewGroup(
@@ -190,72 +235,73 @@ func (m Model) createModuleForm() (tea.Model, tea.Cmd) {
 		)
 	}
 
-	form := huh.NewForm(
-		huh.NewGroup(
+	// Package group
+	packageGroup := huh.NewGroup(
+		huh.NewInput().
+			Title("Common Packages").
+			Description("Packages available in both brew and apt with same name (e.g., git, curl, vim, tmux)").
+			Value(&commonPackages),
+
+		huh.NewConfirm().
+			Title("Add Specific Package?").
+			Description("Need one package with different name on brew vs apt? (e.g., neovim vs nvim)").
+			Affirmative("Yes, add one").
+			Negative("No, common only").
+			Value(&hasSpecific),
+	)
+
+	groups = append(groups, basicGroup, dependencyGroup, packageGroup)
+
+	// Conditionally add specific package group
+	if hasSpecific {
+		specificGroup := huh.NewGroup(
 			huh.NewInput().
-				Title("Module Name").
-				Description("Enter a unique identifier for your module (e.g., nvim, shell, git)").
-				Value(&m.formData.moduleName).
-				Validate(func(str string) error {
-					trimmed := strings.TrimSpace(str)
-					if trimmed == "" {
-						return fmt.Errorf("module name is required")
-					}
-					// Check for conflicts with existing modules
-					for _, module := range m.modules {
-						if module.Config.Name == trimmed {
-							return fmt.Errorf("module '%s' already exists", trimmed)
-						}
-					}
-					return nil
-				}),
+				Title("Specific Package Name").
+				Description("Enter package name (e.g., neovim)").
+				Value(&specificName),
 
-			huh.NewInput().
-				Title("Description").
-				Description("Brief description of what this module configures (optional)").
-				Value(&m.formData.description),
-		),
+			huh.NewSelect[string]().
+				Title("Package Manager").
+				Description("Select which package manager this package is for").
+				Options(
+					huh.NewOption("Homebrew (macOS)", "brew"),
+					huh.NewOption("APT (Debian/Ubuntu)", "apt"),
+					huh.NewOption("Pacman (Arch)", "pacman"),
+					huh.NewOption("YUM (RedHat/CentOS)", "yum"),
+					huh.NewOption("Snap (Universal)", "snap"),
+				).
+				Value(&specificManager),
+		)
+		groups = append(groups, specificGroup)
+	}
 
-		dependencyGroup,
+	form := huh.NewForm(groups...).WithTheme(huh.ThemeCharm())
 
-		huh.NewGroup(
-			huh.NewInput().
-				Title("Common Packages").
-				Description("Packages available in both brew and apt with same name (e.g., git, curl, vim, tmux)").
-				Value(&m.formData.commonPackages),
-
-			huh.NewConfirm().
-				Title("Add Specific Packages?").
-				Description("Need packages with different names on brew vs apt? (e.g., neovim vs nvim)").
-				Affirmative("Yes, add specific").
-				Negative("No, common only").
-				Value(&m.formData.hasSpecificPackages),
-		),
-	).WithTheme(huh.ThemeCharm())
-
+	// Store the form and local variables in the model context
 	m.form = form
 	m.mode = "create"
+
+	// Store form variables in a temporary struct for later use
+	m.createFormData = &CreateFormData{
+		ModuleName:      &moduleName,
+		Description:     &description,
+		Dependencies:    &dependencies,
+		CommonPackages:  &commonPackages,
+		HasSpecific:     &hasSpecific,
+		SpecificName:    &specificName,
+		SpecificManager: &specificManager,
+	}
 
 	return m, m.form.Init()
 }
 
 func (m Model) editModuleForm(module models.ModuleConfig) (tea.Model, tea.Cmd) {
-	m.formData = FormData{
-		moduleName:     module.Name,
-		description:    module.Description,
-		dependencies:   module.Dependencies,
-		commonPackages: strings.Join(module.Packages.Common, ", "),
-		isEditing:      true,
-		editModule:     &module,
-	}
-
-	// Convert specific packages to form format
-	for _, pkg := range module.Packages.Specific {
-		m.formData.specificPackages = append(m.formData.specificPackages, SpecificPackageForm{
-			Name:    pkg.Name,
-			Manager: pkg.Manager,
-		})
-	}
+	// Form data variables initialized with current values
+	var (
+		description    = module.Description
+		dependencies   = module.Dependencies
+		commonPackages = strings.Join(module.Packages.Common, ", ")
+	)
 
 	// Build list of available modules for dependencies (excluding current module)
 	var moduleOptions []huh.Option[string]
@@ -265,6 +311,21 @@ func (m Model) editModuleForm(module models.ModuleConfig) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	var groups []*huh.Group
+
+	// Basic info group
+	basicGroup := huh.NewGroup(
+		huh.NewNote().
+			Title("Editing Module: "+module.Name).
+			Description("Modify the configuration for this module"),
+
+		huh.NewInput().
+			Title("Description").
+			Description("Brief description of what this module configures").
+			Value(&description),
+	)
+
+	// Dependencies group
 	var dependencyGroup *huh.Group
 	if len(moduleOptions) > 0 {
 		dependencyGroup = huh.NewGroup(
@@ -272,7 +333,7 @@ func (m Model) editModuleForm(module models.ModuleConfig) (tea.Model, tea.Cmd) {
 				Title("Dependencies").
 				Description("Select modules that must be installed before this one").
 				Options(moduleOptions...).
-				Value(&m.formData.dependencies),
+				Value(&dependencies),
 		)
 	} else {
 		dependencyGroup = huh.NewGroup(
@@ -282,30 +343,28 @@ func (m Model) editModuleForm(module models.ModuleConfig) (tea.Model, tea.Cmd) {
 		)
 	}
 
-	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewNote().
-				Title("Editing Module: "+module.Name).
-				Description("Modify the configuration for this module"),
+	// Package group
+	packageGroup := huh.NewGroup(
+		huh.NewInput().
+			Title("Common Packages").
+			Description("Packages available in both brew and apt with same name").
+			Value(&commonPackages),
+	)
 
-			huh.NewInput().
-				Title("Description").
-				Description("Brief description of what this module does").
-				Value(&m.formData.description),
-		),
+	groups = append(groups, basicGroup, dependencyGroup, packageGroup)
 
-		dependencyGroup,
-
-		huh.NewGroup(
-			huh.NewInput().
-				Title("Common Packages").
-				Description("Packages available in both brew and apt with same name").
-				Value(&m.formData.commonPackages),
-		),
-	).WithTheme(huh.ThemeCharm())
+	form := huh.NewForm(groups...).WithTheme(huh.ThemeCharm())
 
 	m.form = form
 	m.mode = "edit"
+
+	// Store form variables for later use
+	m.editFormData = &EditFormData{
+		ModuleName:     module.Name,
+		Description:    &description,
+		Dependencies:   &dependencies,
+		CommonPackages: &commonPackages,
+	}
 
 	return m, m.form.Init()
 }
@@ -316,7 +375,12 @@ func (m Model) addDotfileForm() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	m.formData = FormData{}
+	// Form data variables
+	var (
+		moduleChoice string
+		source       string
+		destination  string
+	)
 
 	var moduleOptions []huh.Option[string]
 	for _, module := range m.modules {
@@ -329,34 +393,29 @@ func (m Model) addDotfileForm() (tea.Model, tea.Cmd) {
 				Title("Select Module").
 				Description("Choose which module to add the dotfile to").
 				Options(moduleOptions...).
-				Value(&m.formData.moduleChoice),
+				Value(&moduleChoice),
 
 			huh.NewInput().
 				Title("Source Path").
 				Description("Path within the module (e.g., dotfiles/.bashrc)").
-				Value(&m.formData.source).
-				Validate(func(str string) error {
-					if strings.TrimSpace(str) == "" {
-						return fmt.Errorf("source path is required")
-					}
-					return nil
-				}),
+				Value(&source),
 
 			huh.NewInput().
 				Title("Destination Path").
 				Description("Target path in home directory (e.g., .bashrc)").
-				Value(&m.formData.destination).
-				Validate(func(str string) error {
-					if strings.TrimSpace(str) == "" {
-						return fmt.Errorf("destination path is required")
-					}
-					return nil
-				}),
+				Value(&destination),
 		),
 	).WithTheme(huh.ThemeCharm())
 
 	m.form = form
 	m.mode = "add"
+
+	// Store form variables for later use
+	m.addFormData = &AddFormData{
+		ModuleChoice: &moduleChoice,
+		Source:       &source,
+		Destination:  &destination,
+	}
 
 	return m, m.form.Init()
 }
@@ -364,48 +423,74 @@ func (m Model) addDotfileForm() (tea.Model, tea.Cmd) {
 func (m Model) handleFormCompletion() (tea.Model, tea.Cmd) {
 	switch m.mode {
 	case "create":
-		return m.handleCreateModule()
+		if m.createFormData != nil {
+			return m.handleCreateModuleCompletion()
+		}
 	case "edit":
-		return m.handleEditModule()
+		if m.editFormData != nil {
+			return m.handleEditModuleCompletion()
+		}
 	case "add":
-		return m.handleAddDotfile()
+		if m.addFormData != nil {
+			return m.handleAddDotfileCompletion()
+		}
 	}
 	return m, nil
 }
 
-func (m Model) handleCreateModule() (tea.Model, tea.Cmd) {
-	// Dependencies are already in the correct format from multi-select
-	dependencies := m.formData.dependencies
+func (m Model) handleCreateModuleCompletion() (tea.Model, tea.Cmd) {
+	if m.createFormData == nil {
+		m.error = fmt.Errorf("form data not available")
+		m.form = nil
+		m.mode = ""
+		return m, nil
+	}
+
+	data := m.createFormData
+	moduleName := *data.ModuleName
+	description := *data.Description
+	dependencies := *data.Dependencies
+	commonPackages := *data.CommonPackages
+	hasSpecific := *data.HasSpecific
+	specificName := *data.SpecificName
+	specificManager := *data.SpecificManager
+
+	// Validate required fields
+	if strings.TrimSpace(moduleName) == "" {
+		m.error = fmt.Errorf("module name is required")
+		m.form = nil
+		m.mode = ""
+		return m, nil
+	}
 
 	// Parse common packages
-	var commonPackages []string
-	if strings.TrimSpace(m.formData.commonPackages) != "" {
-		for _, pkg := range strings.Split(m.formData.commonPackages, ",") {
+	var commonPkgs []string
+	if strings.TrimSpace(commonPackages) != "" {
+		for _, pkg := range strings.Split(commonPackages, ",") {
 			pkg = strings.TrimSpace(pkg)
 			if pkg != "" {
-				commonPackages = append(commonPackages, pkg)
+				commonPkgs = append(commonPkgs, pkg)
 			}
 		}
 	}
 
-	// Convert specific packages
-	var specificPackages []models.SpecificPackage
-	for _, pkg := range m.formData.specificPackages {
-		if pkg.Name != "" && pkg.Manager != "" {
-			specificPackages = append(specificPackages, models.SpecificPackage{
-				Name:    pkg.Name,
-				Manager: pkg.Manager,
-			})
-		}
+	// Build package manager config
+	packages := models.PackageManager{
+		Common: commonPkgs,
 	}
 
-	packages := models.PackageManager{
-		Common:   commonPackages,
-		Specific: specificPackages,
+	// Add specific package if provided
+	if hasSpecific && strings.TrimSpace(specificName) != "" && strings.TrimSpace(specificManager) != "" {
+		packages.Specific = []models.SpecificPackage{
+			{
+				Name:    strings.TrimSpace(specificName),
+				Manager: strings.TrimSpace(specificManager),
+			},
+		}
 	}
 
 	// Create the module
-	if err := m.manager.CreateModuleWithConfig(m.formData.moduleName, m.formData.description, dependencies, packages); err != nil {
+	if err := m.manager.CreateModuleWithConfig(moduleName, description, dependencies, packages); err != nil {
 		m.error = err
 		m.form = nil
 		m.mode = ""
@@ -415,39 +500,38 @@ func (m Model) handleCreateModule() (tea.Model, tea.Cmd) {
 	return m.reloadModules()
 }
 
-func (m Model) handleEditModule() (tea.Model, tea.Cmd) {
-	// Dependencies are already in the correct format from multi-select
-	dependencies := m.formData.dependencies
+func (m Model) handleEditModuleCompletion() (tea.Model, tea.Cmd) {
+	if m.editFormData == nil {
+		m.error = fmt.Errorf("form data not available")
+		m.form = nil
+		m.mode = ""
+		return m, nil
+	}
+
+	data := m.editFormData
+	moduleName := data.ModuleName
+	description := *data.Description
+	dependencies := *data.Dependencies
+	commonPackages := *data.CommonPackages
 
 	// Parse common packages
-	var commonPackages []string
-	if strings.TrimSpace(m.formData.commonPackages) != "" {
-		for _, pkg := range strings.Split(m.formData.commonPackages, ",") {
+	var commonPkgs []string
+	if strings.TrimSpace(commonPackages) != "" {
+		for _, pkg := range strings.Split(commonPackages, ",") {
 			pkg = strings.TrimSpace(pkg)
 			if pkg != "" {
-				commonPackages = append(commonPackages, pkg)
+				commonPkgs = append(commonPkgs, pkg)
 			}
 		}
 	}
 
-	// Convert specific packages
-	var specificPackages []models.SpecificPackage
-	for _, pkg := range m.formData.specificPackages {
-		if pkg.Name != "" && pkg.Manager != "" {
-			specificPackages = append(specificPackages, models.SpecificPackage{
-				Name:    pkg.Name,
-				Manager: pkg.Manager,
-			})
-		}
-	}
-
 	packages := models.PackageManager{
-		Common:   commonPackages,
-		Specific: specificPackages,
+		Common: commonPkgs,
+		// TODO: Handle existing specific packages
 	}
 
 	// Update the module
-	if err := m.manager.UpdateModule(m.formData.moduleName, m.formData.description, dependencies, packages); err != nil {
+	if err := m.manager.UpdateModule(moduleName, description, dependencies, packages); err != nil {
 		m.error = err
 		m.form = nil
 		m.mode = ""
@@ -457,8 +541,40 @@ func (m Model) handleEditModule() (tea.Model, tea.Cmd) {
 	return m.reloadModules()
 }
 
-func (m Model) handleAddDotfile() (tea.Model, tea.Cmd) {
-	if err := m.manager.AddDotfile(m.formData.moduleChoice, m.formData.source, m.formData.destination); err != nil {
+func (m Model) handleAddDotfileCompletion() (tea.Model, tea.Cmd) {
+	if m.addFormData == nil {
+		m.error = fmt.Errorf("form data not available")
+		m.form = nil
+		m.mode = ""
+		return m, nil
+	}
+
+	data := m.addFormData
+	moduleChoice := *data.ModuleChoice
+	source := *data.Source
+	destination := *data.Destination
+
+	// Validate required fields
+	if strings.TrimSpace(moduleChoice) == "" {
+		m.error = fmt.Errorf("module selection is required")
+		m.form = nil
+		m.mode = ""
+		return m, nil
+	}
+	if strings.TrimSpace(source) == "" {
+		m.error = fmt.Errorf("source path is required")
+		m.form = nil
+		m.mode = ""
+		return m, nil
+	}
+	if strings.TrimSpace(destination) == "" {
+		m.error = fmt.Errorf("destination path is required")
+		m.form = nil
+		m.mode = ""
+		return m, nil
+	}
+
+	if err := m.manager.AddDotfile(moduleChoice, source, destination); err != nil {
 		m.error = err
 		m.form = nil
 		m.mode = ""
@@ -519,7 +635,11 @@ func (m Model) View() string {
 	}
 
 	if m.form != nil {
-		return m.form.View()
+		formView := m.form.View()
+		if m.error != nil {
+			formView += "\n\n" + errorStyle.Render("Error: "+m.error.Error())
+		}
+		return formView
 	}
 
 	var s strings.Builder
@@ -530,7 +650,6 @@ func (m Model) View() string {
 	if m.error != nil {
 		s.WriteString(errorStyle.Render("Error: " + m.error.Error()))
 		s.WriteString("\n\n")
-		m.error = nil // Clear error after displaying
 	}
 
 	if len(m.modules) == 0 {
