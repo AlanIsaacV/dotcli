@@ -175,17 +175,15 @@ func (i *Installer) installPackagesWithOptions(module models.ModuleConfig, statu
 	}
 
 	var packages []string
-	switch pm {
-	case "brew":
-		packages = module.Packages.Brew
-	case "apt":
-		packages = module.Packages.Apt
-	case "pacman":
-		packages = module.Packages.Pacman
-	case "yum":
-		packages = module.Packages.Yum
-	case "snap":
-		packages = module.Packages.Snap
+
+	// Add common packages (work with all package managers)
+	packages = append(packages, module.Packages.Common...)
+
+	// Add specific packages for this package manager
+	for _, pkg := range module.Packages.Specific {
+		if pkg.Manager == pm {
+			packages = append(packages, pkg.Name)
+		}
 	}
 
 	if len(packages) == 0 {
@@ -233,7 +231,7 @@ func (i *Installer) installPackagesWithOptions(module models.ModuleConfig, statu
 }
 
 func (i *Installer) hasNoPackages(pm models.PackageManager) bool {
-	return len(pm.Brew) == 0 && len(pm.Apt) == 0 && len(pm.Pacman) == 0 && len(pm.Yum) == 0 && len(pm.Snap) == 0
+	return len(pm.Common) == 0 && len(pm.Specific) == 0
 }
 
 func (i *Installer) detectPackageManager() string {

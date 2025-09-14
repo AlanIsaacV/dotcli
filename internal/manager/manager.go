@@ -337,8 +337,7 @@ func (m *Manager) getTemplate(name string) (Template, error) {
 			Config: models.ModuleConfig{
 				Dependencies: []string{},
 				Packages: models.PackageManager{
-					Brew: []string{"zsh"},
-					Apt:  []string{"zsh"},
+					Common: []string{"zsh"},
 				},
 				Dotfiles: []models.DotfileMapping{
 					{Source: "dotfiles/.zshrc", Destination: ".zshrc"},
@@ -354,8 +353,7 @@ func (m *Manager) getTemplate(name string) (Template, error) {
 			Config: models.ModuleConfig{
 				Dependencies: []string{},
 				Packages: models.PackageManager{
-					Brew: []string{"neovim"},
-					Apt:  []string{"neovim"},
+					Common: []string{"neovim"},
 				},
 				Dotfiles: []models.DotfileMapping{
 					{Source: "dotfiles/nvim/", Destination: ".config/nvim/"},
@@ -371,8 +369,7 @@ func (m *Manager) getTemplate(name string) (Template, error) {
 			Config: models.ModuleConfig{
 				Dependencies: []string{},
 				Packages: models.PackageManager{
-					Brew: []string{"git", "curl"},
-					Apt:  []string{"git", "curl"},
+					Common: []string{"git", "curl"},
 				},
 				Dotfiles: []models.DotfileMapping{
 					{Source: "dotfiles/.toolrc", Destination: ".toolrc"},

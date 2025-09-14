@@ -5,12 +5,14 @@ type DotfileMapping struct {
 	Destination string `yaml:"destination"`
 }
 
+type SpecificPackage struct {
+	Name    string `yaml:"name"`
+	Manager string `yaml:"manager"` // brew, apt, pacman, yum, snap
+}
+
 type PackageManager struct {
-	Brew   []string `yaml:"brew,omitempty"`
-	Apt    []string `yaml:"apt,omitempty"`
-	Pacman []string `yaml:"pacman,omitempty"`
-	Yum    []string `yaml:"yum,omitempty"`
-	Snap   []string `yaml:"snap,omitempty"`
+	Common   []string          `yaml:"common,omitempty"`   // Packages with same name across managers
+	Specific []SpecificPackage `yaml:"specific,omitempty"` // Packages with different names or specific managers
 }
 
 type ModuleConfig struct {
