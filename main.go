@@ -6,11 +6,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/alan/dotcli/internal/installer"
-	"github.com/alan/dotcli/internal/manager"
-	"github.com/alan/dotcli/internal/models"
-	"github.com/alan/dotcli/internal/scanner"
-	"github.com/alan/dotcli/internal/ui"
+	"github.com/AlanIsaacV/dotcli/internal/installer"
+	"github.com/AlanIsaacV/dotcli/internal/manager"
+	"github.com/AlanIsaacV/dotcli/internal/models"
+	"github.com/AlanIsaacV/dotcli/internal/scanner"
+	"github.com/AlanIsaacV/dotcli/internal/ui"
 	tea "github.com/charmbracelet/bubbletea"
 )
 

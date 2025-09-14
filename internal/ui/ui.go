@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/alan/dotcli/internal/manager"
-	"github.com/alan/dotcli/internal/models"
+	"github.com/AlanIsaacV/dotcli/internal/manager"
+	"github.com/AlanIsaacV/dotcli/internal/models"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )

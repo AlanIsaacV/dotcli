@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/alan/dotcli/internal/models"
+	"github.com/AlanIsaacV/dotcli/internal/models"
 	"gopkg.in/yaml.v3"
 )
 

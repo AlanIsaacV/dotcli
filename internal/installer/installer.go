@@ -8,7 +8,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/alan/dotcli/internal/models"
+	"github.com/AlanIsaacV/dotcli/internal/models"
 )
 
 type Installer struct {
