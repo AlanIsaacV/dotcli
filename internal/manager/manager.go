@@ -107,6 +107,101 @@ echo "%s setup completed!"
 	return nil
 }
 
+func (m *Manager) CreateModuleWithConfig(name, description string, dependencies []string, packages models.PackageManager) error {
+	modulePath := filepath.Join(m.modulesPath, name)
+
+	if _, err := os.Stat(modulePath); !os.IsNotExist(err) {
+		return fmt.Errorf("module '%s' already exists", name)
+	}
+
+	if err := os.MkdirAll(modulePath, 0755); err != nil {
+		return fmt.Errorf("failed to create module directory: %w", err)
+	}
+
+	// Create config.yaml with provided configuration
+	config := models.ModuleConfig{
+		Name:         name,
+		Description:  description,
+		Dependencies: dependencies,
+		Packages:     packages,
+		Dotfiles:     []models.DotfileMapping{},
+	}
+
+	configData, err := yaml.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	configPath := filepath.Join(modulePath, "config.yaml")
+	if err := os.WriteFile(configPath, configData, 0644); err != nil {
+		return fmt.Errorf("failed to write config: %w", err)
+	}
+
+	// Create install.sh
+	installScript := fmt.Sprintf(`#!/bin/bash
+
+echo "Setting up %s configuration..."
+
+# Packages are handled by DotCLI package manager integration
+# Add your custom setup logic here
+
+echo "%s setup completed!"
+`, name, name)
+
+	installPath := filepath.Join(modulePath, "install.sh")
+	if err := os.WriteFile(installPath, []byte(installScript), 0755); err != nil {
+		return fmt.Errorf("failed to write install script: %w", err)
+	}
+
+	// Create dotfiles directory
+	dotfilesDir := filepath.Join(modulePath, "dotfiles")
+	if err := os.MkdirAll(dotfilesDir, 0755); err != nil {
+		return fmt.Errorf("failed to create dotfiles directory: %w", err)
+	}
+
+	return nil
+}
+
+func (m *Manager) UpdateModule(name, description string, dependencies []string, packages models.PackageManager) error {
+	modulePath := filepath.Join(m.modulesPath, name)
+	configPath := filepath.Join(modulePath, "config.yaml")
+
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		return fmt.Errorf("module '%s' does not exist", name)
+	}
+
+	// Read existing config to preserve dotfiles
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to read config: %w", err)
+	}
+
+	var existingConfig models.ModuleConfig
+	if err := yaml.Unmarshal(data, &existingConfig); err != nil {
+		return fmt.Errorf("failed to parse existing config: %w", err)
+	}
+
+	// Update config with new values, preserving dotfiles
+	config := models.ModuleConfig{
+		Name:         name,
+		Description:  description,
+		Dependencies: dependencies,
+		Packages:     packages,
+		Dotfiles:     existingConfig.Dotfiles, // Preserve existing dotfiles
+	}
+
+	configData, err := yaml.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	if err := os.WriteFile(configPath, configData, 0644); err != nil {
+		return fmt.Errorf("failed to write config: %w", err)
+	}
+
+	return nil
+}
+
 func (m *Manager) AddDotfileFromString(input string) error {
 	parts := strings.Split(input, ":")
 	if len(parts) != 3 {

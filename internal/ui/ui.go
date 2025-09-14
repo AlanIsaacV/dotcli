@@ -30,13 +30,20 @@ type Model struct {
 type FormData struct {
 	moduleName   string
 	description  string
-	template     string
+	dependencies string
+	brewPkgs     string
+	aptPkgs      string
+	pacmanPkgs   string
+	yumPkgs      string
+	snapPkgs     string
 	moduleChoice string
 	source       string
 	destination  string
 	currentField int
 	inputValue   string
 	showingHelp  bool
+	isEditing    bool
+	editModule   *models.ModuleConfig
 }
 
 var (
@@ -126,10 +133,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "c":
 			m.mode = "create"
 			m.formData = FormData{
-				template:     "basic",
 				currentField: 0,
+				isEditing:    false,
 			}
 			m.loadCurrentField()
+
+		case "e":
+			if len(m.modules) > 0 && m.cursor < len(m.modules) {
+				module := m.modules[m.cursor].Config
+				m.mode = "create"
+				m.formData = FormData{
+					moduleName:   module.Name,
+					description:  module.Description,
+					dependencies: strings.Join(module.Dependencies, ", "),
+					brewPkgs:     strings.Join(module.Packages.Brew, ", "),
+					aptPkgs:      strings.Join(module.Packages.Apt, ", "),
+					pacmanPkgs:   strings.Join(module.Packages.Pacman, ", "),
+					yumPkgs:      strings.Join(module.Packages.Yum, ", "),
+					snapPkgs:     strings.Join(module.Packages.Snap, ", "),
+					currentField: 0,
+					isEditing:    true,
+					editModule:   &module,
+				}
+				m.loadCurrentField()
+			} else if len(m.modules) == 0 {
+				m.error = fmt.Errorf("no modules available to edit")
+			}
 
 		case "a":
 			if len(m.modules) == 0 {
@@ -163,7 +192,7 @@ func (m Model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "tab", "down":
 		m.saveCurrentField()
 		m.formData.currentField++
-		maxField := 2 // create form has 3 fields (0,1,2)
+		maxField := 7 // create form has 8 fields (0-7)
 		if m.mode == "add" {
 			maxField = 2 // add form has 3 fields (0,1,2)
 		}
@@ -176,7 +205,7 @@ func (m Model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.formData.currentField--
 		if m.formData.currentField < 0 {
 			if m.mode == "create" {
-				m.formData.currentField = 2
+				m.formData.currentField = 7
 			} else {
 				m.formData.currentField = 2
 			}
@@ -186,6 +215,31 @@ func (m Model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.formData.inputValue) > 0 {
 			m.formData.inputValue = m.formData.inputValue[:len(m.formData.inputValue)-1]
 		}
+	case "ctrl+a":
+		// Select all text in current field
+		if m.mode == "create" {
+			switch m.formData.currentField {
+			case 0:
+				m.formData.inputValue = m.formData.moduleName
+			case 1:
+				m.formData.inputValue = m.formData.description
+			case 2:
+				m.formData.inputValue = m.formData.dependencies
+			case 3:
+				m.formData.inputValue = m.formData.brewPkgs
+			case 4:
+				m.formData.inputValue = m.formData.aptPkgs
+			case 5:
+				m.formData.inputValue = m.formData.pacmanPkgs
+			case 6:
+				m.formData.inputValue = m.formData.yumPkgs
+			case 7:
+				m.formData.inputValue = m.formData.snapPkgs
+			}
+		}
+	case "ctrl+u":
+		// Clear current field
+		m.formData.inputValue = ""
 	case "esc":
 		m.mode = ""
 		m.formData = FormData{}
@@ -208,7 +262,17 @@ func (m *Model) saveCurrentField() {
 		case 1:
 			m.formData.description = m.formData.inputValue
 		case 2:
-			m.formData.template = m.formData.inputValue
+			m.formData.dependencies = m.formData.inputValue
+		case 3:
+			m.formData.brewPkgs = m.formData.inputValue
+		case 4:
+			m.formData.aptPkgs = m.formData.inputValue
+		case 5:
+			m.formData.pacmanPkgs = m.formData.inputValue
+		case 6:
+			m.formData.yumPkgs = m.formData.inputValue
+		case 7:
+			m.formData.snapPkgs = m.formData.inputValue
 		}
 	case "add":
 		switch m.formData.currentField {
@@ -231,7 +295,17 @@ func (m *Model) loadCurrentField() {
 		case 1:
 			m.formData.inputValue = m.formData.description
 		case 2:
-			m.formData.inputValue = m.formData.template
+			m.formData.inputValue = m.formData.dependencies
+		case 3:
+			m.formData.inputValue = m.formData.brewPkgs
+		case 4:
+			m.formData.inputValue = m.formData.aptPkgs
+		case 5:
+			m.formData.inputValue = m.formData.pacmanPkgs
+		case 6:
+			m.formData.inputValue = m.formData.yumPkgs
+		case 7:
+			m.formData.inputValue = m.formData.snapPkgs
 		}
 	case "add":
 		switch m.formData.currentField {
@@ -253,15 +327,81 @@ func (m Model) handleCreateSubmit() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	template := m.formData.template
-	if template == "" {
-		template = "basic"
+	// Validate module name doesn't conflict with existing modules when creating
+	if !m.formData.isEditing {
+		for _, module := range m.modules {
+			if module.Config.Name == strings.TrimSpace(m.formData.moduleName) {
+				m.error = fmt.Errorf("module '%s' already exists. Use 'e' to edit existing modules", m.formData.moduleName)
+				return m, nil
+			}
+		}
 	}
 
-	// Create the module
-	if err := m.manager.CreateModule(m.formData.moduleName, template); err != nil {
-		m.error = err
-		return m, nil
+	// Parse dependencies
+	var dependencies []string
+	if strings.TrimSpace(m.formData.dependencies) != "" {
+		for _, dep := range strings.Split(m.formData.dependencies, ",") {
+			dep = strings.TrimSpace(dep)
+			if dep != "" {
+				dependencies = append(dependencies, dep)
+			}
+		}
+	}
+
+	// Parse packages
+	packages := models.PackageManager{}
+	if strings.TrimSpace(m.formData.brewPkgs) != "" {
+		for _, pkg := range strings.Split(m.formData.brewPkgs, ",") {
+			pkg = strings.TrimSpace(pkg)
+			if pkg != "" {
+				packages.Brew = append(packages.Brew, pkg)
+			}
+		}
+	}
+	if strings.TrimSpace(m.formData.aptPkgs) != "" {
+		for _, pkg := range strings.Split(m.formData.aptPkgs, ",") {
+			pkg = strings.TrimSpace(pkg)
+			if pkg != "" {
+				packages.Apt = append(packages.Apt, pkg)
+			}
+		}
+	}
+	if strings.TrimSpace(m.formData.pacmanPkgs) != "" {
+		for _, pkg := range strings.Split(m.formData.pacmanPkgs, ",") {
+			pkg = strings.TrimSpace(pkg)
+			if pkg != "" {
+				packages.Pacman = append(packages.Pacman, pkg)
+			}
+		}
+	}
+	if strings.TrimSpace(m.formData.yumPkgs) != "" {
+		for _, pkg := range strings.Split(m.formData.yumPkgs, ",") {
+			pkg = strings.TrimSpace(pkg)
+			if pkg != "" {
+				packages.Yum = append(packages.Yum, pkg)
+			}
+		}
+	}
+	if strings.TrimSpace(m.formData.snapPkgs) != "" {
+		for _, pkg := range strings.Split(m.formData.snapPkgs, ",") {
+			pkg = strings.TrimSpace(pkg)
+			if pkg != "" {
+				packages.Snap = append(packages.Snap, pkg)
+			}
+		}
+	}
+
+	// Create or update the module
+	if m.formData.isEditing {
+		if err := m.manager.UpdateModule(m.formData.moduleName, m.formData.description, dependencies, packages); err != nil {
+			m.error = err
+			return m, nil
+		}
+	} else {
+		if err := m.manager.CreateModuleWithConfig(m.formData.moduleName, m.formData.description, dependencies, packages); err != nil {
+			m.error = err
+			return m, nil
+		}
 	}
 
 	// Reload modules after creation
@@ -281,7 +421,13 @@ func (m Model) handleCreateSubmit() (tea.Model, tea.Cmd) {
 		m.allModules = modules
 		// Clear selection to prevent accidental installations
 		m.selected = make(map[string]bool)
-		m.cursor = 0
+		// Keep cursor in bounds
+		if m.cursor >= len(m.modules) {
+			m.cursor = len(m.modules) - 1
+		}
+		if m.cursor < 0 {
+			m.cursor = 0
+		}
 	}
 
 	m.mode = ""
@@ -328,6 +474,13 @@ func (m Model) handleAddSubmit() (tea.Model, tea.Cmd) {
 		}
 		m.modules = moduleStates
 		m.allModules = modules
+		// Keep cursor in bounds
+		if m.cursor >= len(m.modules) {
+			m.cursor = len(m.modules) - 1
+		}
+		if m.cursor < 0 {
+			m.cursor = 0
+		}
 	}
 
 	m.mode = ""
@@ -426,7 +579,7 @@ func (m Model) View() string {
 	} else {
 		forceText = " • f: force OFF"
 	}
-	s.WriteString(helpStyle.Render("↑/↓: navigate • space: select • c: create • a: add dotfile • enter: install" + forceText + " • q: quit"))
+	s.WriteString(helpStyle.Render("↑/↓: navigate • space: select • c: create • e: edit • a: add dotfile • enter: install" + forceText + " • q: quit"))
 
 	if len(m.selected) > 0 {
 		s.WriteString("\n\n")
@@ -442,49 +595,81 @@ func (m Model) View() string {
 func (m Model) renderCreateForm() string {
 	var s strings.Builder
 
-	s.WriteString(titleStyle.Render("Create New Module"))
+	title := "Create New Module"
+	action := "create"
+	if m.formData.isEditing {
+		title = "Edit Module: " + m.formData.moduleName
+		action = "save"
+	}
+	s.WriteString(titleStyle.Render(title))
 	s.WriteString("\n\n")
 
-	// Module name field
-	nameLabel := "Module Name:"
-	nameValue := m.formData.moduleName
-	if m.formData.currentField == 0 {
-		nameLabel = selectedStyle.Render("► " + nameLabel)
-		nameValue = cursorStyle.Render(m.formData.inputValue + "█")
-	} else {
-		nameLabel = "  " + nameLabel
-		nameValue = fieldStyle.Render(nameValue)
+	fields := []struct {
+		label    string
+		value    string
+		help     string
+		section  string
+		required bool
+	}{
+		{"Module Name", m.formData.moduleName, "Unique identifier for the module", "Basic Info", true},
+		{"Description", m.formData.description, "Brief description of the module (optional)", "Basic Info", false},
+		{"Dependencies", m.formData.dependencies, "Comma-separated list of module dependencies (e.g., shell, git)", "Dependencies", false},
+		{"Brew Packages", m.formData.brewPkgs, "macOS packages (e.g., git, neovim, tmux)", "Package Managers", false},
+		{"Apt Packages", m.formData.aptPkgs, "Debian/Ubuntu packages (e.g., git, neovim, tmux)", "Package Managers", false},
+		{"Pacman Packages", m.formData.pacmanPkgs, "Arch Linux packages (e.g., git, neovim, tmux)", "Package Managers", false},
+		{"Yum Packages", m.formData.yumPkgs, "RedHat/CentOS packages (e.g., git, neovim, tmux)", "Package Managers", false},
+		{"Snap Packages", m.formData.snapPkgs, "Universal packages (e.g., code, discord)", "Package Managers", false},
 	}
-	s.WriteString(nameLabel + " " + nameValue + "\n")
 
-	// Description field
-	descLabel := "Description:"
-	descValue := m.formData.description
-	if m.formData.currentField == 1 {
-		descLabel = selectedStyle.Render("► " + descLabel)
-		descValue = cursorStyle.Render(m.formData.inputValue + "█")
-	} else {
-		descLabel = "  " + descLabel
-		descValue = fieldStyle.Render(descValue)
-	}
-	s.WriteString(descLabel + " " + descValue + "\n")
+	currentSection := ""
+	for i, field := range fields {
+		// Add section headers
+		if field.section != currentSection {
+			if currentSection != "" {
+				s.WriteString("\n")
+			}
+			s.WriteString(statusStyle.Render("── " + field.section + " ──"))
+			s.WriteString("\n")
+			currentSection = field.section
+		}
 
-	// Template field
-	templateLabel := "Template:"
-	templateValue := m.formData.template
-	if m.formData.currentField == 2 {
-		templateLabel = selectedStyle.Render("► " + templateLabel)
-		templateValue = cursorStyle.Render(m.formData.inputValue + "█")
-	} else {
-		templateLabel = "  " + templateLabel
-		templateValue = fieldStyle.Render(templateValue)
+		label := field.label + ":"
+		value := field.value
+
+		if m.formData.currentField == i {
+			labelText := "► " + label
+			if field.required {
+				labelText += " *"
+			}
+			label = selectedStyle.Render(labelText)
+			displayValue := m.formData.inputValue
+			if displayValue == "" {
+				displayValue = " "
+			}
+			value = cursorStyle.Render(displayValue + "█")
+			s.WriteString(label + " " + value + "\n")
+			s.WriteString(helpStyle.Render("  "+field.help) + "\n")
+		} else {
+			labelText := "  " + label
+			if field.required {
+				labelText += " *"
+			}
+			label = labelText
+			if value == "" {
+				if field.required {
+					value = errorStyle.Render("(required)")
+				} else {
+					value = helpStyle.Render("(optional)")
+				}
+			} else {
+				value = fieldStyle.Render(value)
+			}
+			s.WriteString(label + " " + value + "\n")
+		}
 	}
-	s.WriteString(templateLabel + " " + templateValue + "\n")
 
 	s.WriteString("\n")
-	s.WriteString(helpStyle.Render("Available templates: basic, shell, editor, cli-tool"))
-	s.WriteString("\n")
-	s.WriteString(helpStyle.Render("tab/↓: next field • shift+tab/↑: prev • enter: create • esc: cancel"))
+	s.WriteString(helpStyle.Render("tab/↓: next • shift+tab/↑: prev • ctrl+a: select all • ctrl+u: clear • enter: " + action + " • esc: cancel"))
 
 	if m.error != nil {
 		s.WriteString("\n\n")
