@@ -21,7 +21,11 @@ func main() {
 		log.Fatal("Failed to get home directory:", err)
 	}
 
-	dotfilesPath := filepath.Join(homeDir, "dotfiles")
+	// Allow custom dotfiles path via environment variable for testing
+	dotfilesPath := os.Getenv("DOTFILES_PATH")
+	if dotfilesPath == "" {
+		dotfilesPath = filepath.Join(homeDir, "dotfiles")
+	}
 
 	if _, err := os.Stat(dotfilesPath); os.IsNotExist(err) {
 		if err := os.MkdirAll(filepath.Join(dotfilesPath, "modules"), 0755); err != nil {
@@ -40,7 +44,7 @@ func main() {
 		fmt.Println("No modules found. Use 'c' in the interface to create your first module.")
 	}
 
-	model := ui.NewModel(modules, mgr)
+	model := ui.NewModel(modules, mgr, dotfilesPath)
 	p := tea.NewProgram(model, tea.WithAltScreen())
 
 	finalModel, err := p.Run()

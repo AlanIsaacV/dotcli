@@ -6,6 +6,7 @@ import (
 
 	"github.com/AlanIsaacV/dotcli/internal/manager"
 	"github.com/AlanIsaacV/dotcli/internal/models"
+	"github.com/AlanIsaacV/dotcli/internal/scanner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -21,16 +22,21 @@ type Model struct {
 	mode           string
 	formData       FormData
 	manager        *manager.Manager
+	scanner        *scanner.Scanner
 	allModules     []models.ModuleConfig
+	dotfilesPath   string
 }
 
 type FormData struct {
 	moduleName   string
 	description  string
 	template     string
-	dotfilePaths []string
+	moduleChoice string
+	source       string
+	destination  string
 	currentField int
 	inputValue   string
+	showingHelp  bool
 }
 
 var (
@@ -45,9 +51,11 @@ var (
 	statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#04B575"))
 	errorStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5F87"))
 	helpStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#626262"))
+	fieldStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
+	cursorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF79C6"))
 )
 
-func NewModel(modules []models.ModuleConfig, mgr *manager.Manager) Model {
+func NewModel(modules []models.ModuleConfig, mgr *manager.Manager, dotfilesPath string) Model {
 	moduleStates := make([]models.ModuleState, len(modules))
 	for i, module := range modules {
 		moduleStates[i] = models.ModuleState{
@@ -57,10 +65,12 @@ func NewModel(modules []models.ModuleConfig, mgr *manager.Manager) Model {
 	}
 
 	return Model{
-		modules:    moduleStates,
-		selected:   make(map[string]bool),
-		manager:    mgr,
-		allModules: modules,
+		modules:      moduleStates,
+		selected:     make(map[string]bool),
+		manager:      mgr,
+		scanner:      scanner.New(dotfilesPath),
+		allModules:   modules,
+		dotfilesPath: dotfilesPath,
 	}
 }
 
@@ -71,6 +81,10 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if m.mode == "create" || m.mode == "add" {
+			return m.updateForm(msg)
+		}
+
 		switch msg.String() {
 		case "ctrl+c", "q":
 			m.quitting = true
@@ -87,14 +101,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case " ":
-			module := m.modules[m.cursor]
-			if m.selected[module.Config.Name] {
-				delete(m.selected, module.Config.Name)
-				m.modules[m.cursor].Selected = false
-			} else {
-				m.selected[module.Config.Name] = true
-				m.modules[m.cursor].Selected = true
-				m.autoSelectDependencies(module.Config)
+			if len(m.modules) > 0 {
+				module := m.modules[m.cursor]
+				if m.selected[module.Config.Name] {
+					delete(m.selected, module.Config.Name)
+					m.modules[m.cursor].Selected = false
+				} else {
+					m.selected[module.Config.Name] = true
+					m.modules[m.cursor].Selected = true
+					m.autoSelectDependencies(module.Config)
+				}
 			}
 
 		case "enter":
@@ -108,29 +124,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.forceReinstall = !m.forceReinstall
 
 		case "c":
-			if m.mode == "" {
-				m.mode = "create"
-				m.formData = FormData{template: "basic", currentField: 0}
-				m.formData.inputValue = m.formData.moduleName
+			m.mode = "create"
+			m.formData = FormData{
+				template:     "basic",
+				currentField: 0,
 			}
+			m.loadCurrentField()
 
 		case "a":
-			if m.mode == "" {
-				m.mode = "add"
-				m.formData = FormData{currentField: 0}
-				m.formData.inputValue = m.formData.moduleName
+			if len(m.modules) == 0 {
+				m.error = fmt.Errorf("no modules available. Create a module first")
+				return m, nil
 			}
+			m.mode = "add"
+			m.formData = FormData{
+				currentField: 0,
+			}
+			m.loadCurrentField()
 
 		case "esc":
-			if m.mode != "" {
-				m.mode = ""
-				m.formData = FormData{}
-			}
-		}
-
-		// Handle form input
-		if m.mode == "create" || m.mode == "add" {
-			return m.updateForm(msg)
+			m.mode = ""
+			m.formData = FormData{}
+			m.error = nil
 		}
 	}
 
@@ -148,9 +163,11 @@ func (m Model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "tab", "down":
 		m.saveCurrentField()
 		m.formData.currentField++
-		if m.mode == "create" && m.formData.currentField > 2 {
-			m.formData.currentField = 0
-		} else if m.mode == "add" && m.formData.currentField > 1 {
+		maxField := 2 // create form has 3 fields (0,1,2)
+		if m.mode == "add" {
+			maxField = 2 // add form has 3 fields (0,1,2)
+		}
+		if m.formData.currentField > maxField {
 			m.formData.currentField = 0
 		}
 		m.loadCurrentField()
@@ -161,7 +178,7 @@ func (m Model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.mode == "create" {
 				m.formData.currentField = 2
 			} else {
-				m.formData.currentField = 1
+				m.formData.currentField = 2
 			}
 		}
 		m.loadCurrentField()
@@ -169,6 +186,10 @@ func (m Model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.formData.inputValue) > 0 {
 			m.formData.inputValue = m.formData.inputValue[:len(m.formData.inputValue)-1]
 		}
+	case "esc":
+		m.mode = ""
+		m.formData = FormData{}
+		m.error = nil
 	default:
 		if len(msg.String()) == 1 {
 			m.formData.inputValue += msg.String()
@@ -192,12 +213,11 @@ func (m *Model) saveCurrentField() {
 	case "add":
 		switch m.formData.currentField {
 		case 0:
-			m.formData.moduleName = m.formData.inputValue
+			m.formData.moduleChoice = m.formData.inputValue
 		case 1:
-			if len(m.formData.dotfilePaths) == 0 {
-				m.formData.dotfilePaths = append(m.formData.dotfilePaths, "")
-			}
-			m.formData.dotfilePaths[0] = m.formData.inputValue
+			m.formData.source = m.formData.inputValue
+		case 2:
+			m.formData.destination = m.formData.inputValue
 		}
 	}
 }
@@ -216,26 +236,52 @@ func (m *Model) loadCurrentField() {
 	case "add":
 		switch m.formData.currentField {
 		case 0:
-			m.formData.inputValue = m.formData.moduleName
+			m.formData.inputValue = m.formData.moduleChoice
 		case 1:
-			if len(m.formData.dotfilePaths) > 0 {
-				m.formData.inputValue = m.formData.dotfilePaths[0]
-			} else {
-				m.formData.inputValue = ""
-			}
+			m.formData.inputValue = m.formData.source
+		case 2:
+			m.formData.inputValue = m.formData.destination
 		}
 	}
 }
 
 func (m Model) handleCreateSubmit() (tea.Model, tea.Cmd) {
-	if m.formData.moduleName == "" {
+	m.saveCurrentField()
+
+	if strings.TrimSpace(m.formData.moduleName) == "" {
 		m.error = fmt.Errorf("module name is required")
 		return m, nil
 	}
 
-	if err := m.manager.CreateModule(m.formData.moduleName, m.formData.template); err != nil {
+	template := m.formData.template
+	if template == "" {
+		template = "basic"
+	}
+
+	// Create the module
+	if err := m.manager.CreateModule(m.formData.moduleName, template); err != nil {
 		m.error = err
 		return m, nil
+	}
+
+	// Reload modules after creation
+	modules, err := m.scanner.ScanModules()
+	if err != nil {
+		m.error = fmt.Errorf("module created but failed to reload: %w", err)
+	} else {
+		// Update the model with new modules
+		moduleStates := make([]models.ModuleState, len(modules))
+		for i, module := range modules {
+			moduleStates[i] = models.ModuleState{
+				Config:   module,
+				Selected: false,
+			}
+		}
+		m.modules = moduleStates
+		m.allModules = modules
+		// Clear selection to prevent accidental installations
+		m.selected = make(map[string]bool)
+		m.cursor = 0
 	}
 
 	m.mode = ""
@@ -244,20 +290,44 @@ func (m Model) handleCreateSubmit() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleAddSubmit() (tea.Model, tea.Cmd) {
-	if m.formData.moduleName == "" || len(m.formData.dotfilePaths) == 0 {
-		m.error = fmt.Errorf("module name and dotfile path are required")
+	m.saveCurrentField()
+
+	if strings.TrimSpace(m.formData.moduleChoice) == "" {
+		m.error = fmt.Errorf("module name is required")
 		return m, nil
 	}
 
-	parts := strings.Split(m.formData.dotfilePaths[0], ":")
-	if len(parts) != 2 {
-		m.error = fmt.Errorf("format should be source:destination")
+	if strings.TrimSpace(m.formData.source) == "" {
+		m.error = fmt.Errorf("source path is required")
 		return m, nil
 	}
 
-	if err := m.manager.AddDotfile(m.formData.moduleName, strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])); err != nil {
+	if strings.TrimSpace(m.formData.destination) == "" {
+		m.error = fmt.Errorf("destination path is required")
+		return m, nil
+	}
+
+	// Add the dotfile
+	if err := m.manager.AddDotfile(m.formData.moduleChoice, m.formData.source, m.formData.destination); err != nil {
 		m.error = err
 		return m, nil
+	}
+
+	// Reload modules after adding dotfile
+	modules, err := m.scanner.ScanModules()
+	if err != nil {
+		m.error = fmt.Errorf("dotfile added but failed to reload: %w", err)
+	} else {
+		// Update the model with reloaded modules
+		moduleStates := make([]models.ModuleState, len(modules))
+		for i, module := range modules {
+			moduleStates[i] = models.ModuleState{
+				Config:   module,
+				Selected: false,
+			}
+		}
+		m.modules = moduleStates
+		m.allModules = modules
 	}
 
 	m.mode = ""
@@ -301,6 +371,13 @@ func (m Model) View() string {
 	if m.error != nil {
 		s.WriteString(errorStyle.Render("Error: " + m.error.Error()))
 		s.WriteString("\n\n")
+		m.error = nil // Clear error after displaying
+	}
+
+	if len(m.modules) == 0 {
+		s.WriteString("No modules found. Press 'c' to create your first module.\n\n")
+		s.WriteString(helpStyle.Render("c: create module • q: quit"))
+		return s.String()
 	}
 
 	s.WriteString("Select modules to install:\n\n")
@@ -373,9 +450,10 @@ func (m Model) renderCreateForm() string {
 	nameValue := m.formData.moduleName
 	if m.formData.currentField == 0 {
 		nameLabel = selectedStyle.Render("► " + nameLabel)
-		nameValue = m.formData.inputValue
+		nameValue = cursorStyle.Render(m.formData.inputValue + "█")
 	} else {
 		nameLabel = "  " + nameLabel
+		nameValue = fieldStyle.Render(nameValue)
 	}
 	s.WriteString(nameLabel + " " + nameValue + "\n")
 
@@ -384,9 +462,10 @@ func (m Model) renderCreateForm() string {
 	descValue := m.formData.description
 	if m.formData.currentField == 1 {
 		descLabel = selectedStyle.Render("► " + descLabel)
-		descValue = m.formData.inputValue
+		descValue = cursorStyle.Render(m.formData.inputValue + "█")
 	} else {
 		descLabel = "  " + descLabel
+		descValue = fieldStyle.Render(descValue)
 	}
 	s.WriteString(descLabel + " " + descValue + "\n")
 
@@ -395,12 +474,15 @@ func (m Model) renderCreateForm() string {
 	templateValue := m.formData.template
 	if m.formData.currentField == 2 {
 		templateLabel = selectedStyle.Render("► " + templateLabel)
-		templateValue = m.formData.inputValue
+		templateValue = cursorStyle.Render(m.formData.inputValue + "█")
 	} else {
 		templateLabel = "  " + templateLabel
+		templateValue = fieldStyle.Render(templateValue)
 	}
 	s.WriteString(templateLabel + " " + templateValue + "\n")
 
+	s.WriteString("\n")
+	s.WriteString(helpStyle.Render("Available templates: basic, shell, editor, cli-tool"))
 	s.WriteString("\n")
 	s.WriteString(helpStyle.Render("tab/↓: next field • shift+tab/↑: prev • enter: create • esc: cancel"))
 
@@ -418,31 +500,55 @@ func (m Model) renderAddForm() string {
 	s.WriteString(titleStyle.Render("Add Dotfile to Module"))
 	s.WriteString("\n\n")
 
+	// Available modules display
+	if m.formData.currentField == 0 {
+		s.WriteString(helpStyle.Render("Available modules: "))
+		var moduleNames []string
+		for _, module := range m.modules {
+			moduleNames = append(moduleNames, module.Config.Name)
+		}
+		s.WriteString(helpStyle.Render(strings.Join(moduleNames, ", ")))
+		s.WriteString("\n\n")
+	}
+
 	// Module name field
 	nameLabel := "Module Name:"
-	nameValue := m.formData.moduleName
+	nameValue := m.formData.moduleChoice
 	if m.formData.currentField == 0 {
 		nameLabel = selectedStyle.Render("► " + nameLabel)
-		nameValue = m.formData.inputValue
+		nameValue = cursorStyle.Render(m.formData.inputValue + "█")
 	} else {
 		nameLabel = "  " + nameLabel
+		nameValue = fieldStyle.Render(nameValue)
 	}
 	s.WriteString(nameLabel + " " + nameValue + "\n")
 
-	// Dotfile path field
-	pathLabel := "Dotfile Path (source:destination):"
-	var pathValue string
+	// Source path field
+	sourceLabel := "Source Path:"
+	sourceValue := m.formData.source
 	if m.formData.currentField == 1 {
-		pathLabel = selectedStyle.Render("► " + pathLabel)
-		pathValue = m.formData.inputValue
+		sourceLabel = selectedStyle.Render("► " + sourceLabel)
+		sourceValue = cursorStyle.Render(m.formData.inputValue + "█")
 	} else {
-		pathLabel = "  " + pathLabel
-		if len(m.formData.dotfilePaths) > 0 {
-			pathValue = m.formData.dotfilePaths[0]
-		}
+		sourceLabel = "  " + sourceLabel
+		sourceValue = fieldStyle.Render(sourceValue)
 	}
-	s.WriteString(pathLabel + " " + pathValue + "\n")
+	s.WriteString(sourceLabel + " " + sourceValue + "\n")
 
+	// Destination path field
+	destLabel := "Destination Path:"
+	destValue := m.formData.destination
+	if m.formData.currentField == 2 {
+		destLabel = selectedStyle.Render("► " + destLabel)
+		destValue = cursorStyle.Render(m.formData.inputValue + "█")
+	} else {
+		destLabel = "  " + destLabel
+		destValue = fieldStyle.Render(destValue)
+	}
+	s.WriteString(destLabel + " " + destValue + "\n")
+
+	s.WriteString("\n")
+	s.WriteString(helpStyle.Render("Example: dotfiles/.bashrc → .bashrc"))
 	s.WriteString("\n")
 	s.WriteString(helpStyle.Render("tab/↓: next field • shift+tab/↑: prev • enter: add • esc: cancel"))
 
