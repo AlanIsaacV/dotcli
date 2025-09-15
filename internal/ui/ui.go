@@ -60,36 +60,14 @@ type moduleItem struct {
 	selected bool
 }
 
+func (i moduleItem) FilterValue() string { return i.module.Name }
+func (i moduleItem) Description() string { return i.module.Description }
 func (i moduleItem) Title() string {
 	prefix := "  "
 	if i.selected {
 		prefix = "✓ "
 	}
-	title := prefix + i.module.Name
-	if i.module.Description != "" {
-		title += " - " + i.module.Description
-	}
-	return title
-}
-
-func (i moduleItem) Description() string {
-	var parts []string
-
-	if len(i.module.Dependencies) > 0 {
-		deps := strings.Join(i.module.Dependencies, ", ")
-		parts = append(parts, fmt.Sprintf("requires: %s", deps))
-	}
-
-	totalPkgs := len(i.module.Packages.Common) + len(i.module.Packages.Specific)
-	if totalPkgs > 0 {
-		parts = append(parts, fmt.Sprintf("%d packages", totalPkgs))
-	}
-
-	return strings.Join(parts, " • ")
-}
-
-func (i moduleItem) FilterValue() string {
-	return i.module.Name + " " + i.module.Description
+	return prefix + i.module.Name
 }
 
 type delegateKeyMap struct {
