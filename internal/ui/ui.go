@@ -7,14 +7,35 @@ import (
 	"github.com/AlanIsaacV/dotcli/internal/manager"
 	"github.com/AlanIsaacV/dotcli/internal/models"
 	"github.com/AlanIsaacV/dotcli/internal/scanner"
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 )
 
+var (
+	appStyle = lipgloss.NewStyle().Padding(1, 2)
+
+	titleStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FAFAFA")).
+			Background(lipgloss.Color("#7D56F4")).
+			Padding(0, 1)
+
+	selectedStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#EE6FF8"))
+
+	statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#04B575"))
+	errorStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5F87"))
+	helpStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#626262"))
+
+	statusMessageStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.AdaptiveColor{Light: "#04B575", Dark: "#04B575"}).
+				Render
+)
+
 type Model struct {
-	modules        []models.ModuleState
-	cursor         int
+	list           list.Model
 	selected       map[string]bool
 	exportMode     bool
 	quitting       bool
@@ -30,6 +51,163 @@ type Model struct {
 	editFormData   *EditFormData
 	addFormData    *AddFormData
 	importFormData *ImportFormData
+	keys           *listKeyMap
+	delegateKeys   *delegateKeyMap
+}
+
+type moduleItem struct {
+	module   models.ModuleConfig
+	selected bool
+}
+
+func (i moduleItem) Title() string {
+	prefix := "  "
+	if i.selected {
+		prefix = "✓ "
+	}
+	title := prefix + i.module.Name
+	if i.module.Description != "" {
+		title += " - " + i.module.Description
+	}
+	return title
+}
+
+func (i moduleItem) Description() string {
+	var parts []string
+
+	if len(i.module.Dependencies) > 0 {
+		deps := strings.Join(i.module.Dependencies, ", ")
+		parts = append(parts, fmt.Sprintf("requires: %s", deps))
+	}
+
+	totalPkgs := len(i.module.Packages.Common) + len(i.module.Packages.Specific)
+	if totalPkgs > 0 {
+		parts = append(parts, fmt.Sprintf("%d packages", totalPkgs))
+	}
+
+	return strings.Join(parts, " • ")
+}
+
+func (i moduleItem) FilterValue() string {
+	return i.module.Name + " " + i.module.Description
+}
+
+type delegateKeyMap struct {
+	choose     key.Binding
+	edit       key.Binding
+	add        key.Binding
+	importFile key.Binding
+	export     key.Binding
+}
+
+func (d delegateKeyMap) ShortHelp() []key.Binding {
+	return []key.Binding{
+		d.choose,
+		d.edit,
+		d.add,
+		d.importFile,
+		d.export,
+	}
+}
+
+func (d delegateKeyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{
+			d.choose,
+			d.edit,
+		},
+		{
+			d.add,
+			d.importFile,
+			d.export,
+		},
+	}
+}
+
+func newDelegateKeyMap() *delegateKeyMap {
+	return &delegateKeyMap{
+		choose: key.NewBinding(
+			key.WithKeys(" "),
+			key.WithHelp("space", "select"),
+		),
+		edit: key.NewBinding(
+			key.WithKeys("e"),
+			key.WithHelp("e", "edit"),
+		),
+		add: key.NewBinding(
+			key.WithKeys("a"),
+			key.WithHelp("a", "add dotfile"),
+		),
+		importFile: key.NewBinding(
+			key.WithKeys("i"),
+			key.WithHelp("i", "import"),
+		),
+		export: key.NewBinding(
+			key.WithKeys("x"),
+			key.WithHelp("x", "toggle export"),
+		),
+	}
+}
+
+type listKeyMap struct {
+	create  key.Binding
+	install key.Binding
+}
+
+func newListKeyMap() *listKeyMap {
+	return &listKeyMap{
+		create: key.NewBinding(
+			key.WithKeys("c"),
+			key.WithHelp("c", "create module"),
+		),
+		install: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "install"),
+		),
+	}
+}
+
+func newItemDelegate(keys *delegateKeyMap) list.DefaultDelegate {
+	d := list.NewDefaultDelegate()
+
+	d.UpdateFunc = func(msg tea.Msg, m *list.Model) tea.Cmd {
+		if _, ok := m.SelectedItem().(moduleItem); !ok {
+			return nil
+		}
+
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch {
+			case key.Matches(msg, keys.choose):
+				// This will be handled in the main model
+				return nil
+			case key.Matches(msg, keys.edit):
+				// This will be handled in the main model
+				return nil
+			case key.Matches(msg, keys.add):
+				// This will be handled in the main model
+				return nil
+			case key.Matches(msg, keys.importFile):
+				// This will be handled in the main model
+				return nil
+			case key.Matches(msg, keys.export):
+				// This will be handled in the main model
+				return nil
+			}
+		}
+
+		return nil
+	}
+
+	d.ShortHelpFunc = func() []key.Binding {
+		return keys.ShortHelp()
+	}
+
+	d.FullHelpFunc = func() [][]key.Binding {
+		return keys.FullHelp()
+	}
+
+	return d
 }
 
 type CreateFormData struct {
@@ -74,40 +252,51 @@ type SpecificCommandForm struct {
 	OS      string
 }
 
-var (
-	titleStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FAFAFA")).
-			Background(lipgloss.Color("#7D56F4")).
-			Padding(0, 1)
-
-	selectedStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#EE6FF8"))
-
-	statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#04B575"))
-	errorStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5F87"))
-	helpStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#626262"))
-)
-
 func NewModel(modules []models.ModuleConfig, mgr *manager.Manager, dotfilesPath string) Model {
-	moduleStates := make([]models.ModuleState, len(modules))
+	items := make([]list.Item, len(modules))
 	for i, module := range modules {
-		moduleStates[i] = models.ModuleState{
-			Config:   module,
-			Selected: false,
+		items[i] = moduleItem{
+			module:   module,
+			selected: false,
+		}
+	}
+
+	delegateKeys := newDelegateKeyMap()
+	listKeys := newListKeyMap()
+
+	delegate := newItemDelegate(delegateKeys)
+	l := list.New(items, delegate, 0, 0)
+	l.Title = "DotCLI - Dotfiles Manager"
+	l.Styles.Title = titleStyle
+	l.SetShowStatusBar(false)
+	l.SetFilteringEnabled(true)
+	l.AdditionalFullHelpKeys = func() []key.Binding {
+		return []key.Binding{
+			listKeys.create,
+			listKeys.install,
 		}
 	}
 
 	return Model{
-		modules:      moduleStates,
+		list:         l,
 		selected:     make(map[string]bool),
 		manager:      mgr,
 		scanner:      scanner.New(dotfilesPath),
 		allModules:   modules,
 		dotfilesPath: dotfilesPath,
+		keys:         listKeys,
+		delegateKeys: delegateKeys,
 	}
 }
 
 func (m Model) Init() tea.Cmd {
+	return nil
+}
+
+func (m Model) getCurrentModule() *models.ModuleConfig {
+	if item, ok := m.list.SelectedItem().(moduleItem); ok {
+		return &item.module
+	}
 	return nil
 }
 
@@ -124,75 +313,92 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		h, v := appStyle.GetFrameSize()
+		m.list.SetSize(msg.Width-h, msg.Height-v)
+		return m, nil
+
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "ctrl+c", "q":
-			m.quitting = true
-			return m, tea.Quit
+		// Don't match any of the keys below if we're actively filtering.
+		if m.list.FilterState() == list.Filtering {
+			break
+		}
 
-		case "up", "k":
-			if m.cursor > 0 {
-				m.cursor--
-			}
-
-		case "down", "j":
-			if m.cursor < len(m.modules)-1 {
-				m.cursor++
-			}
-
-		case " ":
-			if len(m.modules) > 0 {
-				module := m.modules[m.cursor]
-				if m.selected[module.Config.Name] {
-					delete(m.selected, module.Config.Name)
-					m.modules[m.cursor].Selected = false
+		switch {
+		case key.Matches(msg, m.delegateKeys.choose):
+			if item, ok := m.list.SelectedItem().(moduleItem); ok {
+				if m.selected[item.module.Name] {
+					delete(m.selected, item.module.Name)
 				} else {
-					m.selected[module.Config.Name] = true
-					m.modules[m.cursor].Selected = true
-					m.autoSelectDependencies(module.Config)
+					m.selected[item.module.Name] = true
+					m.autoSelectDependencies(item.module)
 				}
+				m.updateListItem(item.module.Name)
 			}
+			return m, nil
 
-		case "enter":
+		case key.Matches(msg, m.delegateKeys.edit):
+			if currentModule := m.getCurrentModule(); currentModule != nil {
+				return m.editModuleForm(*currentModule)
+			} else {
+				m.error = fmt.Errorf("no module selected")
+			}
+			return m, nil
+
+		case key.Matches(msg, m.delegateKeys.add):
+			m.error = nil
+			return m.addDotfileForm()
+
+		case key.Matches(msg, m.delegateKeys.importFile):
+			m.error = nil
+			return m.importDotfileForm()
+
+		case key.Matches(msg, m.delegateKeys.export):
+			m.exportMode = !m.exportMode
+			return m, nil
+
+		case key.Matches(msg, m.keys.create):
+			m.error = nil
+			return m.createModuleForm()
+
+		case key.Matches(msg, m.keys.install):
 			if len(m.selected) > 0 {
 				m.shouldInstall = true
 				m.quitting = true
 				return m, tea.Quit
 			}
+			return m, nil
 
-		case "x":
-			m.exportMode = !m.exportMode
+		case msg.String() == "ctrl+c" || msg.String() == "q":
+			m.quitting = true
+			return m, tea.Quit
 
-		case "c":
-			m.error = nil
-			return m.createModuleForm()
-
-		case "e":
-			m.error = nil
-			if len(m.modules) > 0 && m.cursor < len(m.modules) {
-				return m.editModuleForm(m.modules[m.cursor].Config)
-			} else if len(m.modules) == 0 {
-				m.error = fmt.Errorf("no modules available to edit")
-			}
-
-		case "a":
-			m.error = nil
-			return m.addDotfileForm()
-
-		case "i":
-			m.error = nil
-			return m.importDotfileForm()
-
-		case "esc":
+		case msg.String() == "esc":
 			if m.form != nil {
 				m.form = nil
 				m.mode = ""
 				m.error = nil
 			}
+			return m, nil
 		}
 	}
 
-	return m, nil
+	var cmd tea.Cmd
+	m.list, cmd = m.list.Update(msg)
+	return m, cmd
+}
+
+func (m *Model) updateListItem(moduleName string) {
+	items := m.list.Items()
+	for i, item := range items {
+		if moduleItem, ok := item.(moduleItem); ok {
+			if moduleItem.module.Name == moduleName {
+				moduleItem.selected = m.selected[moduleName]
+				items[i] = moduleItem
+			}
+		}
+	}
+	m.list.SetItems(items)
 }
 
 func (m Model) createModuleForm() (tea.Model, tea.Cmd) {
@@ -211,8 +417,10 @@ func (m Model) createModuleForm() (tea.Model, tea.Cmd) {
 
 	// Build list of available modules for dependencies
 	var moduleOptions []huh.Option[string]
-	for _, module := range m.modules {
-		moduleOptions = append(moduleOptions, huh.NewOption(module.Config.Name, module.Config.Name))
+	for _, item := range m.list.Items() {
+		if moduleItem, ok := item.(moduleItem); ok {
+			moduleOptions = append(moduleOptions, huh.NewOption(moduleItem.module.Name, moduleItem.module.Name))
+		}
 	}
 
 	var groups []*huh.Group
@@ -229,9 +437,11 @@ func (m Model) createModuleForm() (tea.Model, tea.Cmd) {
 					return nil // Allow empty during typing
 				}
 				// Check for conflicts with existing modules
-				for _, module := range m.modules {
-					if module.Config.Name == trimmed {
-						return fmt.Errorf("module '%s' already exists", trimmed)
+				for _, item := range m.list.Items() {
+					if moduleItem, ok := item.(moduleItem); ok {
+						if moduleItem.module.Name == trimmed {
+							return fmt.Errorf("module '%s' already exists", trimmed)
+						}
 					}
 				}
 				return nil
@@ -385,9 +595,11 @@ func (m Model) editModuleForm(module models.ModuleConfig) (tea.Model, tea.Cmd) {
 
 	// Build list of available modules for dependencies (excluding current module)
 	var moduleOptions []huh.Option[string]
-	for _, mod := range m.modules {
-		if mod.Config.Name != module.Name {
-			moduleOptions = append(moduleOptions, huh.NewOption(mod.Config.Name, mod.Config.Name))
+	for _, item := range m.list.Items() {
+		if moduleItem, ok := item.(moduleItem); ok {
+			if moduleItem.module.Name != module.Name {
+				moduleOptions = append(moduleOptions, huh.NewOption(moduleItem.module.Name, moduleItem.module.Name))
+			}
 		}
 	}
 
@@ -553,30 +765,29 @@ func (m Model) editModuleForm(module models.ModuleConfig) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) addDotfileForm() (tea.Model, tea.Cmd) {
-	if len(m.modules) == 0 {
+	if len(m.allModules) == 0 {
 		m.error = fmt.Errorf("no modules available. Create a module first")
+		return m, nil
+	}
+
+	// Use current selected module directly
+	currentModule := m.getCurrentModule()
+	if currentModule == nil {
+		m.error = fmt.Errorf("no module selected")
 		return m, nil
 	}
 
 	// Form data variables
 	var (
-		moduleChoice string
-		source       string
-		destination  string
+		source      string
+		destination string
 	)
-
-	var moduleOptions []huh.Option[string]
-	for _, module := range m.modules {
-		moduleOptions = append(moduleOptions, huh.NewOption(module.Config.Name, module.Config.Name))
-	}
 
 	form := huh.NewForm(
 		huh.NewGroup(
-			huh.NewSelect[string]().
-				Title("Select Module").
-				Description("Choose which module to add the dotfile to").
-				Options(moduleOptions...).
-				Value(&moduleChoice),
+			huh.NewNote().
+				Title("Adding dotfile to: "+currentModule.Name).
+				Description("Configure the dotfile mapping for this module"),
 
 			huh.NewInput().
 				Title("Source Path").
@@ -594,6 +805,7 @@ func (m Model) addDotfileForm() (tea.Model, tea.Cmd) {
 	m.mode = "add"
 
 	// Store form variables for later use
+	moduleChoice := currentModule.Name
 	m.addFormData = &AddFormData{
 		ModuleChoice: &moduleChoice,
 		Source:       &source,
@@ -604,30 +816,29 @@ func (m Model) addDotfileForm() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) importDotfileForm() (tea.Model, tea.Cmd) {
-	if len(m.modules) == 0 {
+	if len(m.allModules) == 0 {
 		m.error = fmt.Errorf("no modules available. Create a module first")
+		return m, nil
+	}
+
+	// Use current selected module directly
+	currentModule := m.getCurrentModule()
+	if currentModule == nil {
+		m.error = fmt.Errorf("no module selected")
 		return m, nil
 	}
 
 	// Form data variables
 	var (
-		moduleChoice    string
 		sourcePath      string
 		destinationPath string
 	)
 
-	var moduleOptions []huh.Option[string]
-	for _, module := range m.modules {
-		moduleOptions = append(moduleOptions, huh.NewOption(module.Config.Name, module.Config.Name))
-	}
-
 	form := huh.NewForm(
 		huh.NewGroup(
-			huh.NewSelect[string]().
-				Title("Select Module").
-				Description("Choose which module to import the dotfile to").
-				Options(moduleOptions...).
-				Value(&moduleChoice),
+			huh.NewNote().
+				Title("Importing dotfile to: "+currentModule.Name).
+				Description("Import an existing file/directory into this module"),
 
 			huh.NewInput().
 				Title("Source Path").
@@ -645,6 +856,7 @@ func (m Model) importDotfileForm() (tea.Model, tea.Cmd) {
 	m.mode = "import"
 
 	// Store form variables for later use
+	moduleChoice := currentModule.Name
 	m.importFormData = &ImportFormData{
 		ModuleChoice:    &moduleChoice,
 		SourcePath:      &sourcePath,
@@ -926,24 +1138,16 @@ func (m Model) reloadModules() (tea.Model, tea.Cmd) {
 	if err != nil {
 		m.error = fmt.Errorf("operation completed but failed to reload: %w", err)
 	} else {
-		moduleStates := make([]models.ModuleState, len(modules))
+		items := make([]list.Item, len(modules))
 		for i, module := range modules {
-			moduleStates[i] = models.ModuleState{
-				Config:   module,
-				Selected: false,
+			items[i] = moduleItem{
+				module:   module,
+				selected: false,
 			}
 		}
-		m.modules = moduleStates
+		m.list.SetItems(items)
 		m.allModules = modules
 		m.selected = make(map[string]bool)
-
-		// Keep cursor in bounds
-		if m.cursor >= len(m.modules) {
-			m.cursor = len(m.modules) - 1
-		}
-		if m.cursor < 0 {
-			m.cursor = 0
-		}
 	}
 
 	m.form = nil
@@ -955,10 +1159,10 @@ func (m *Model) autoSelectDependencies(module models.ModuleConfig) {
 	for _, dep := range module.Dependencies {
 		if !m.selected[dep] {
 			m.selected[dep] = true
-			for i, modState := range m.modules {
-				if modState.Config.Name == dep {
-					m.modules[i].Selected = true
-					m.autoSelectDependencies(modState.Config)
+			for _, mod := range m.allModules {
+				if mod.Name == dep {
+					m.updateListItem(dep)
+					m.autoSelectDependencies(mod)
 					break
 				}
 			}
@@ -979,70 +1183,40 @@ func (m Model) View() string {
 		return formView
 	}
 
-	var s strings.Builder
-
-	s.WriteString(titleStyle.Render("DotCLI - Dotfiles Manager"))
-	s.WriteString("\n\n")
-
-	if m.error != nil {
-		s.WriteString(errorStyle.Render("Error: " + m.error.Error()))
+	if len(m.allModules) == 0 {
+		var s strings.Builder
+		s.WriteString(titleStyle.Render("DotCLI - Dotfiles Manager"))
 		s.WriteString("\n\n")
-	}
-
-	if len(m.modules) == 0 {
+		if m.error != nil {
+			s.WriteString(errorStyle.Render("Error: " + m.error.Error()))
+			s.WriteString("\n\n")
+		}
 		s.WriteString("No modules found. Press 'c' to create your first module.\n\n")
 		s.WriteString(helpStyle.Render("c: create module • q: quit"))
 		return s.String()
 	}
 
-	s.WriteString("Select modules to install:\n\n")
-
-	for i, module := range m.modules {
-		cursor := " "
-		if m.cursor == i {
-			cursor = ">"
+	// Update list items to show selection status
+	items := m.list.Items()
+	for i, item := range items {
+		if moduleItem, ok := item.(moduleItem); ok {
+			moduleItem.selected = m.selected[moduleItem.module.Name]
+			items[i] = moduleItem
 		}
+	}
+	m.list.SetItems(items)
 
-		checked := " "
-		if module.Selected {
-			checked = "✓"
-		}
+	var s strings.Builder
 
-		line := fmt.Sprintf("%s [%s] %s", cursor, checked, module.Config.Name)
-		if module.Config.Description != "" {
-			line += " - " + module.Config.Description
-		}
-
-		if module.Selected {
-			line = selectedStyle.Render(line)
-		}
-
-		if len(module.Config.Dependencies) > 0 {
-			deps := strings.Join(module.Config.Dependencies, ", ")
-			line += helpStyle.Render(fmt.Sprintf(" (requires: %s)", deps))
-		}
-
-		// Show packages count
-		totalPkgs := len(module.Config.Packages.Common) + len(module.Config.Packages.Specific)
-		if totalPkgs > 0 {
-			line += helpStyle.Render(fmt.Sprintf(" (%d packages)", totalPkgs))
-		}
-
-		s.WriteString(line + "\n")
+	if m.error != nil {
+		s.WriteString(errorStyle.Render("Error: " + m.error.Error()))
+		s.WriteString("\n")
 	}
 
-	s.WriteString("\n")
-	exportText := ""
-	if m.exportMode {
-		exportText = " • x: export ON"
-	} else {
-		exportText = " • x: export OFF"
-	}
-
-	s.WriteString(helpStyle.Render("↑/↓: navigate • space: select • c: create • e: edit • a: add dotfile • i: import dotfile • enter: install" + exportText + " • q: quit"))
+	s.WriteString(m.list.View())
 
 	if len(m.selected) > 0 {
-		s.WriteString("\n\n")
+		s.WriteString("\n")
 		statusText := fmt.Sprintf("Selected %d modules", len(m.selected))
 		if m.exportMode {
 			statusText += " (dotfiles only)"
@@ -1050,7 +1224,7 @@ func (m Model) View() string {
 		s.WriteString(statusStyle.Render(statusText))
 	}
 
-	return s.String()
+	return appStyle.Render(s.String())
 }
 
 func (m Model) ShouldInstall() bool {

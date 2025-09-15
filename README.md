@@ -24,14 +24,17 @@ go build -o bin/dotcli .
 ## Usage
 
 ### Interactive Interface
-- `↑/↓` - Navigate modules
+- `↑/↓` or `j/k` - Navigate modules
 - `Space` - Select/deselect modules
+- `/` - Filter/search modules (real-time)
 - `x` - Toggle export mode (dotfiles only)
 - `c` - Create new module
-- `e` - Edit existing module
-- `a` - Add dotfile to module
-- `i` - Import existing dotfile
+- `e` - Edit current module
+- `a` - Add dotfile to current module
+- `i` - Import dotfile to current module
 - `Enter` - Install selected modules
+- `?` - Toggle help (shows all keybindings)
+- `Esc` - Clear filter/exit forms
 - `q` - Quit
 
 ### Module Structure
@@ -84,12 +87,31 @@ Perfect for when software is already installed and you just want to apply your c
 2. Select modules with `Space`
 3. Press `Enter` to install only dotfiles (skips packages and commands)
 
+### Smart Module Selection
+For improved workflow efficiency:
+- When adding dotfiles (`a`) or importing (`i`), the currently highlighted module is used automatically
+- Navigate to the desired module first, then press `a` or `i` for instant operation
+- No need to select the module again in forms - streamlined workflow
+- Use `/` to quickly filter and find modules by name or description
+- Filter works in real-time and supports fuzzy matching
+
 ### Path Expansion
 The system supports various path formats:
 - `~/.bashrc` - Home directory expansion
 - `$HOME/.config/nvim` - Environment variable expansion
 - `.bashrc` - Relative to home directory
 - `/absolute/path` - Absolute paths
+
+### Modern List Interface
+Built with Charm's Bubbles list component for professional UX:
+- Native list component with proper keybinding integration
+- Smooth navigation with vim-style keybindings (`j/k`) and arrow keys
+- Real-time fuzzy filtering with `/` to search modules instantly
+- Visual selection indicators with checkmarks (✓)
+- Built-in help system accessible with `?`
+- Proper delegate pattern for custom actions (space, e, a, i, x)
+- Responsive design that adapts to your terminal size
+- Pagination support for large module lists
 
 ## Templates
 

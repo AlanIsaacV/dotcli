@@ -335,7 +335,15 @@ func (m *Manager) ImportDotfile(moduleName, sourcePath string) error {
 	// Add to config
 	relativeSource := filepath.Join("dotfiles", basename)
 	homeDir, _ := os.UserHomeDir()
-	relativeDest, _ := filepath.Rel(homeDir, sourcePath)
+
+	// Calculate destination as relative to home (e.g., ".bashrc" instead of full path)
+	var relativeDest string
+	if strings.HasPrefix(sourcePath, homeDir) {
+		relativeDest, _ = filepath.Rel(homeDir, sourcePath)
+	} else {
+		// If not in home directory, use the basename
+		relativeDest = basename
+	}
 
 	if err := m.AddDotfile(moduleName, relativeSource, relativeDest); err != nil {
 		return fmt.Errorf("failed to add to config: %w", err)
@@ -463,7 +471,15 @@ func (m *Manager) ImportDotfileWithDestination(moduleName, sourcePath, destinati
 
 	// Calculate relative destination path for config
 	homeDir, _ := os.UserHomeDir()
-	relativeDest, _ := filepath.Rel(homeDir, sourcePath)
+
+	// Calculate destination as relative to home (e.g., ".bashrc" instead of full path)
+	var relativeDest string
+	if strings.HasPrefix(sourcePath, homeDir) {
+		relativeDest, _ = filepath.Rel(homeDir, sourcePath)
+	} else {
+		// If not in home directory, use the basename
+		relativeDest = filepath.Base(sourcePath)
+	}
 	relativeSource := filepath.Join("dotfiles", destinationPath)
 
 	// Add to config
