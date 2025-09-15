@@ -135,6 +135,31 @@ func (i *Installer) InstallModuleWithOptions(module models.ModuleConfig, statusC
 		}
 	}
 
+	// Run custom commands
+	if len(module.Commands) > 0 {
+		statusCh <- models.InstallationStatus{
+			Module: module.Name,
+			Status: "Running custom commands",
+		}
+		if err := i.runCustomCommands(module, statusCh); err != nil {
+			statusCh <- models.InstallationStatus{
+				Module: module.Name,
+				Status: "Failed to run custom commands",
+				Error:  err,
+			}
+			return err
+		}
+		progress := 0.8
+		if packagesInstalled {
+			progress = 0.9
+		}
+		statusCh <- models.InstallationStatus{
+			Module:   module.Name,
+			Status:   "Custom commands completed",
+			Progress: progress,
+		}
+	}
+
 	// Create symlinks
 	if len(module.Dotfiles) > 0 {
 		statusCh <- models.InstallationStatus{
@@ -235,7 +260,7 @@ func (i *Installer) hasNoPackages(pm models.PackageManager) bool {
 }
 
 func (i *Installer) detectPackageManager() string {
-	managers := []string{"brew", "apt", "pacman", "yum", "snap"}
+	managers := []string{"brew", "apt"}
 
 	for _, manager := range managers {
 		if i.commandExists(manager) {
@@ -259,12 +284,6 @@ func (i *Installer) isPackageInstalled(pm string, pkg string) (bool, string) {
 		cmd = exec.Command("brew", "list", "--versions", pkg)
 	case "apt":
 		cmd = exec.Command("dpkg-query", "-W", "-f=${Status} ${Version}", pkg)
-	case "pacman":
-		cmd = exec.Command("pacman", "-Q", pkg)
-	case "yum":
-		cmd = exec.Command("rpm", "-q", "--queryformat", "%{VERSION}", pkg)
-	case "snap":
-		cmd = exec.Command("snap", "list", pkg)
 	default:
 		return false, ""
 	}
@@ -295,35 +314,6 @@ func (i *Installer) isPackageInstalled(pm string, pkg string) (bool, string) {
 				return true, parts[3]
 			}
 			return true, "installed"
-		}
-		return false, ""
-	case "pacman":
-		// pacman -Q returns: "package 1.2.3-1"
-		if outputStr != "" {
-			parts := strings.Fields(outputStr)
-			if len(parts) >= 2 {
-				return true, parts[1]
-			}
-			return true, "installed"
-		}
-		return false, ""
-	case "yum":
-		// rpm -q returns version directly
-		if outputStr != "" && !strings.Contains(outputStr, "not installed") {
-			return true, outputStr
-		}
-		return false, ""
-	case "snap":
-		// snap list returns table format, check if package exists
-		lines := strings.Split(outputStr, "\n")
-		for _, line := range lines {
-			if strings.HasPrefix(line, pkg+" ") || strings.HasPrefix(line, pkg+"\t") {
-				parts := strings.Fields(line)
-				if len(parts) >= 2 {
-					return true, parts[1]
-				}
-				return true, "installed"
-			}
 		}
 		return false, ""
 	}
@@ -367,23 +357,6 @@ func (i *Installer) installWithPackageManager(pm string, packages []string, stat
 			}
 		}
 		cmd = exec.Command("sudo", append([]string{"apt", "install", "-y"}, packages...)...)
-	case "pacman":
-		cmd = exec.Command("sudo", append([]string{"pacman", "-S", "--noconfirm"}, packages...)...)
-	case "yum":
-		cmd = exec.Command("sudo", append([]string{"yum", "install", "-y"}, packages...)...)
-	case "snap":
-		for _, pkg := range packages {
-			statusCh <- models.InstallationStatus{
-				Module: moduleName,
-				Status: fmt.Sprintf("Installing %s via snap", pkg),
-			}
-			snapCmd := exec.Command("sudo", "snap", "install", pkg)
-			output, err := snapCmd.CombinedOutput()
-			if err != nil {
-				return fmt.Errorf("failed to install %s via snap: %w\nOutput: %s", pkg, err, string(output))
-			}
-		}
-		return nil
 	default:
 		return fmt.Errorf("unsupported package manager: %s", pm)
 	}
@@ -418,7 +391,7 @@ func (i *Installer) runInstallScript(module models.ModuleConfig) error {
 func (i *Installer) createSymlinks(module models.ModuleConfig) error {
 	for _, dotfile := range module.Dotfiles {
 		sourcePath := filepath.Join(module.Path, dotfile.Source)
-		destPath := filepath.Join(i.homeDir, dotfile.Destination)
+		destPath := i.expandPath(dotfile.Destination)
 
 		if err := i.createSymlink(sourcePath, destPath); err != nil {
 			return fmt.Errorf("failed to create symlink for %s: %w", dotfile.Source, err)
@@ -426,6 +399,38 @@ func (i *Installer) createSymlinks(module models.ModuleConfig) error {
 	}
 
 	return nil
+}
+
+func (i *Installer) expandPath(path string) string {
+	// Handle ~ expansion
+	if strings.HasPrefix(path, "~/") {
+		return filepath.Join(i.homeDir, path[2:])
+	}
+
+	// Handle exact ~ (home directory)
+	if path == "~" {
+		return i.homeDir
+	}
+
+	// Handle $HOME expansion
+	if strings.HasPrefix(path, "$HOME/") {
+		return filepath.Join(i.homeDir, path[6:])
+	}
+
+	// Handle exact $HOME
+	if path == "$HOME" {
+		return i.homeDir
+	}
+
+	// Expand environment variables
+	expanded := os.ExpandEnv(path)
+
+	// If path is relative and doesn't start with . or /, assume it's relative to home
+	if !filepath.IsAbs(expanded) && !strings.HasPrefix(expanded, ".") {
+		return filepath.Join(i.homeDir, expanded)
+	}
+
+	return expanded
 }
 
 func (i *Installer) createSymlink(source, dest string) error {
@@ -446,6 +451,40 @@ func (i *Installer) createSymlink(source, dest string) error {
 	}
 
 	return os.Symlink(absSource, dest)
+}
+
+func (i *Installer) runCustomCommands(module models.ModuleConfig, statusCh chan<- models.InstallationStatus) error {
+	pm := i.detectPackageManager()
+	if pm == "" {
+		return fmt.Errorf("no supported package manager found")
+	}
+
+	for _, command := range module.Commands {
+		// Skip commands that don't match current package manager (OS)
+		if command.OS != "" && command.OS != pm {
+			continue
+		}
+
+		statusCh <- models.InstallationStatus{
+			Module: module.Name,
+			Status: fmt.Sprintf("Running command: %s", command.Command),
+		}
+
+		var cmd *exec.Cmd
+		if runtime.GOOS == "windows" {
+			cmd = exec.Command("cmd", "/C", command.Command)
+		} else {
+			cmd = exec.Command("bash", "-c", command.Command)
+		}
+
+		cmd.Dir = module.Path
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("command failed: %w\nCommand: %s\nOutput: %s", err, command.Command, string(output))
+		}
+	}
+
+	return nil
 }
 
 func (i *Installer) GetInstallationOrder(modules []models.ModuleConfig, selected []string) ([]string, error) {

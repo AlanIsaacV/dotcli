@@ -107,7 +107,7 @@ echo "%s setup completed!"
 	return nil
 }
 
-func (m *Manager) CreateModuleWithConfig(name, description string, dependencies []string, packages models.PackageManager) error {
+func (m *Manager) CreateModuleWithConfig(name, description string, dependencies []string, packages models.PackageManager, commands []models.InstallCommand) error {
 	modulePath := filepath.Join(m.modulesPath, name)
 
 	if _, err := os.Stat(modulePath); !os.IsNotExist(err) {
@@ -124,6 +124,7 @@ func (m *Manager) CreateModuleWithConfig(name, description string, dependencies 
 		Description:  description,
 		Dependencies: dependencies,
 		Packages:     packages,
+		Commands:     commands,
 		Dotfiles:     []models.DotfileMapping{},
 	}
 
@@ -137,20 +138,30 @@ func (m *Manager) CreateModuleWithConfig(name, description string, dependencies 
 		return fmt.Errorf("failed to write config: %w", err)
 	}
 
-	// Create install.sh
-	installScript := fmt.Sprintf(`#!/bin/bash
+	// Only create install.sh if there are actual custom commands (not empty)
+	hasCustomCommands := false
+	for _, cmd := range commands {
+		if strings.TrimSpace(cmd.Command) != "" {
+			hasCustomCommands = true
+			break
+		}
+	}
+
+	if hasCustomCommands {
+		installScript := fmt.Sprintf(`#!/bin/bash
 
 echo "Setting up %s configuration..."
 
 # Packages are handled by DotCLI package manager integration
-# Add your custom setup logic here
+# Custom commands will be executed by DotCLI
 
 echo "%s setup completed!"
 `, name, name)
 
-	installPath := filepath.Join(modulePath, "install.sh")
-	if err := os.WriteFile(installPath, []byte(installScript), 0755); err != nil {
-		return fmt.Errorf("failed to write install script: %w", err)
+		installPath := filepath.Join(modulePath, "install.sh")
+		if err := os.WriteFile(installPath, []byte(installScript), 0755); err != nil {
+			return fmt.Errorf("failed to write install script: %w", err)
+		}
 	}
 
 	// Create dotfiles directory
@@ -162,7 +173,7 @@ echo "%s setup completed!"
 	return nil
 }
 
-func (m *Manager) UpdateModule(name, description string, dependencies []string, packages models.PackageManager) error {
+func (m *Manager) UpdateModule(name, description string, dependencies []string, packages models.PackageManager, commands []models.InstallCommand) error {
 	modulePath := filepath.Join(m.modulesPath, name)
 	configPath := filepath.Join(modulePath, "config.yaml")
 
@@ -187,6 +198,7 @@ func (m *Manager) UpdateModule(name, description string, dependencies []string, 
 		Description:  description,
 		Dependencies: dependencies,
 		Packages:     packages,
+		Commands:     commands,
 		Dotfiles:     existingConfig.Dotfiles, // Preserve existing dotfiles
 	}
 
@@ -270,10 +282,7 @@ func (m *Manager) ImportDotfile(moduleName, sourcePath string) error {
 	}
 
 	// Expand source path
-	if strings.HasPrefix(sourcePath, "~/") {
-		homeDir, _ := os.UserHomeDir()
-		sourcePath = filepath.Join(homeDir, sourcePath[2:])
-	}
+	sourcePath = m.expandPath(sourcePath)
 
 	sourcePath, err := filepath.Abs(sourcePath)
 	if err != nil {
@@ -305,6 +314,44 @@ func (m *Manager) ImportDotfile(moduleName, sourcePath string) error {
 	return nil
 }
 
+func (m *Manager) expandPath(path string) string {
+	// Get home directory
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return path // Return original path if we can't get home dir
+	}
+
+	// Handle ~ expansion
+	if strings.HasPrefix(path, "~/") {
+		return filepath.Join(homeDir, path[2:])
+	}
+
+	// Handle exact ~ (home directory)
+	if path == "~" {
+		return homeDir
+	}
+
+	// Handle $HOME expansion
+	if strings.HasPrefix(path, "$HOME/") {
+		return filepath.Join(homeDir, path[6:])
+	}
+
+	// Handle exact $HOME
+	if path == "$HOME" {
+		return homeDir
+	}
+
+	// Expand environment variables
+	expanded := os.ExpandEnv(path)
+
+	// If path is relative and doesn't start with . or /, assume it's relative to home
+	if !filepath.IsAbs(expanded) && !strings.HasPrefix(expanded, ".") && !strings.HasPrefix(expanded, "/") {
+		return filepath.Join(homeDir, expanded)
+	}
+
+	return expanded
+}
+
 func (m *Manager) copyFile(src, dst string) error {
 	data, err := os.ReadFile(src)
 	if err != nil {
@@ -327,6 +374,7 @@ func (m *Manager) getTemplate(name string) (Template, error) {
 			Config: models.ModuleConfig{
 				Dependencies: []string{},
 				Packages:     models.PackageManager{},
+				Commands:     []models.InstallCommand{},
 				Dotfiles:     []models.DotfileMapping{},
 			},
 			Files: map[string]string{},
@@ -339,6 +387,7 @@ func (m *Manager) getTemplate(name string) (Template, error) {
 				Packages: models.PackageManager{
 					Common: []string{"zsh"},
 				},
+				Commands: []models.InstallCommand{},
 				Dotfiles: []models.DotfileMapping{
 					{Source: "dotfiles/.zshrc", Destination: ".zshrc"},
 				},
@@ -353,8 +402,13 @@ func (m *Manager) getTemplate(name string) (Template, error) {
 			Config: models.ModuleConfig{
 				Dependencies: []string{},
 				Packages: models.PackageManager{
-					Common: []string{"neovim"},
+					Common: []string{},
+					Specific: []models.SpecificPackage{
+						{Name: "neovim", Manager: "brew"},
+						{Name: "neovim", Manager: "apt"},
+					},
 				},
+				Commands: []models.InstallCommand{},
 				Dotfiles: []models.DotfileMapping{
 					{Source: "dotfiles/nvim/", Destination: ".config/nvim/"},
 				},
@@ -371,6 +425,7 @@ func (m *Manager) getTemplate(name string) (Template, error) {
 				Packages: models.PackageManager{
 					Common: []string{"git", "curl"},
 				},
+				Commands: []models.InstallCommand{},
 				Dotfiles: []models.DotfileMapping{
 					{Source: "dotfiles/.toolrc", Destination: ".toolrc"},
 				},

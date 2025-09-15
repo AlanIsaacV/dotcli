@@ -32,26 +32,39 @@ type Model struct {
 }
 
 type CreateFormData struct {
-	ModuleName      *string
-	Description     *string
-	Dependencies    *[]string
-	CommonPackages  *string
-	HasSpecific     *bool
-	SpecificName    *string
-	SpecificManager *string
+	ModuleName       *string
+	Description      *string
+	Dependencies     *[]string
+	CommonPackages   *string
+	SpecificPackages []SpecificPackageForm
+	CommonCommands   *string
+	SpecificCommands []SpecificCommandForm
 }
 
 type EditFormData struct {
-	ModuleName     string
-	Description    *string
-	Dependencies   *[]string
-	CommonPackages *string
+	ModuleName       string
+	Description      *string
+	Dependencies     *[]string
+	CommonPackages   *string
+	CommonCommands   *string
+	SpecificPackages []SpecificPackageForm
+	SpecificCommands []SpecificCommandForm
 }
 
 type AddFormData struct {
 	ModuleChoice *string
 	Source       *string
 	Destination  *string
+}
+
+type SpecificPackageForm struct {
+	Name    string
+	Manager string
+}
+
+type SpecificCommandForm struct {
+	Command string
+	OS      string
 }
 
 var (
@@ -174,14 +187,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) createModuleForm() (tea.Model, tea.Cmd) {
 	// Form data variables - these will be directly bound to huh
 	var (
-		moduleName      string
-		description     string
-		dependencies    []string
-		commonPackages  string
-		hasSpecific     bool
-		specificName    string
-		specificManager string
+		moduleName     string
+		description    string
+		dependencies   []string
+		commonPackages string
+		commonCommands string
 	)
+
+	// Initialize specific packages and commands
+	specificPackages := []SpecificPackageForm{{}, {}}
+	specificCommands := []SpecificCommandForm{{}, {}}
 
 	// Build list of available modules for dependencies
 	var moduleOptions []huh.Option[string]
@@ -239,41 +254,85 @@ func (m Model) createModuleForm() (tea.Model, tea.Cmd) {
 	packageGroup := huh.NewGroup(
 		huh.NewInput().
 			Title("Common Packages").
-			Description("Packages available in both brew and apt with same name (e.g., git, curl, vim, tmux)").
+			Description("Packages with same name on both macOS and Ubuntu (e.g., git, curl, vim, tmux)").
 			Value(&commonPackages),
-
-		huh.NewConfirm().
-			Title("Add Specific Package?").
-			Description("Need one package with different name on brew vs apt? (e.g., neovim vs nvim)").
-			Affirmative("Yes, add one").
-			Negative("No, common only").
-			Value(&hasSpecific),
 	)
 
-	groups = append(groups, basicGroup, dependencyGroup, packageGroup)
+	// Commands group
+	commandGroup := huh.NewGroup(
+		huh.NewInput().
+			Title("Common Commands").
+			Description("Commands that work on both macOS and Ubuntu (optional)").
+			Value(&commonCommands),
+	)
 
-	// Conditionally add specific package group
-	if hasSpecific {
-		specificGroup := huh.NewGroup(
-			huh.NewInput().
-				Title("Specific Package Name").
-				Description("Enter package name (e.g., neovim)").
-				Value(&specificName),
+	// Specific packages group
+	specificPkgGroup := huh.NewGroup(
+		huh.NewInput().
+			Title("Specific Package 1 - Name").
+			Description("Package with different name on macOS vs Ubuntu").
+			Value(&specificPackages[0].Name),
 
-			huh.NewSelect[string]().
-				Title("Package Manager").
-				Description("Select which package manager this package is for").
-				Options(
-					huh.NewOption("Homebrew (macOS)", "brew"),
-					huh.NewOption("APT (Debian/Ubuntu)", "apt"),
-					huh.NewOption("Pacman (Arch)", "pacman"),
-					huh.NewOption("YUM (RedHat/CentOS)", "yum"),
-					huh.NewOption("Snap (Universal)", "snap"),
-				).
-				Value(&specificManager),
-		)
-		groups = append(groups, specificGroup)
-	}
+		huh.NewSelect[string]().
+			Title("Specific Package 1 - Manager").
+			Description("Package manager for this package").
+			Options(
+				huh.NewOption("None", ""),
+				huh.NewOption("Homebrew (macOS)", "brew"),
+				huh.NewOption("APT (Debian/Ubuntu)", "apt"),
+			).
+			Value(&specificPackages[0].Manager),
+
+		huh.NewInput().
+			Title("Specific Package 2 - Name").
+			Description("Another package with different name on macOS vs Ubuntu").
+			Value(&specificPackages[1].Name),
+
+		huh.NewSelect[string]().
+			Title("Specific Package 2 - Manager").
+			Description("Package manager for this package").
+			Options(
+				huh.NewOption("None", ""),
+				huh.NewOption("Homebrew (macOS)", "brew"),
+				huh.NewOption("APT (Debian/Ubuntu)", "apt"),
+			).
+			Value(&specificPackages[1].Manager),
+	)
+
+	// Specific commands group
+	specificCmdGroup := huh.NewGroup(
+		huh.NewInput().
+			Title("Specific Command 1 - Command").
+			Description("Command only for macOS or Ubuntu").
+			Value(&specificCommands[0].Command),
+
+		huh.NewSelect[string]().
+			Title("Specific Command 1 - OS").
+			Description("Operating system for this command").
+			Options(
+				huh.NewOption("None", ""),
+				huh.NewOption("Homebrew (macOS)", "brew"),
+				huh.NewOption("APT (Debian/Ubuntu)", "apt"),
+			).
+			Value(&specificCommands[0].OS),
+
+		huh.NewInput().
+			Title("Specific Command 2 - Command").
+			Description("Another command only for macOS or Ubuntu").
+			Value(&specificCommands[1].Command),
+
+		huh.NewSelect[string]().
+			Title("Specific Command 2 - OS").
+			Description("Operating system for this command").
+			Options(
+				huh.NewOption("None", ""),
+				huh.NewOption("Homebrew (macOS)", "brew"),
+				huh.NewOption("APT (Debian/Ubuntu)", "apt"),
+			).
+			Value(&specificCommands[1].OS),
+	)
+
+	groups = append(groups, basicGroup, dependencyGroup, packageGroup, commandGroup, specificPkgGroup, specificCmdGroup)
 
 	form := huh.NewForm(groups...).WithTheme(huh.ThemeCharm())
 
@@ -283,13 +342,13 @@ func (m Model) createModuleForm() (tea.Model, tea.Cmd) {
 
 	// Store form variables in a temporary struct for later use
 	m.createFormData = &CreateFormData{
-		ModuleName:      &moduleName,
-		Description:     &description,
-		Dependencies:    &dependencies,
-		CommonPackages:  &commonPackages,
-		HasSpecific:     &hasSpecific,
-		SpecificName:    &specificName,
-		SpecificManager: &specificManager,
+		ModuleName:       &moduleName,
+		Description:      &description,
+		Dependencies:     &dependencies,
+		CommonPackages:   &commonPackages,
+		CommonCommands:   &commonCommands,
+		SpecificPackages: specificPackages,
+		SpecificCommands: specificCommands,
 	}
 
 	return m, m.form.Init()
@@ -301,7 +360,17 @@ func (m Model) editModuleForm(module models.ModuleConfig) (tea.Model, tea.Cmd) {
 		description    = module.Description
 		dependencies   = module.Dependencies
 		commonPackages = strings.Join(module.Packages.Common, ", ")
+		commonCommands = ""
 	)
+
+	// Build common commands string
+	var commonCmds []string
+	for _, cmd := range module.Commands {
+		if cmd.OS == "" {
+			commonCmds = append(commonCmds, cmd.Command)
+		}
+	}
+	commonCommands = strings.Join(commonCmds, "; ")
 
 	// Build list of available modules for dependencies (excluding current module)
 	var moduleOptions []huh.Option[string]
@@ -347,11 +416,111 @@ func (m Model) editModuleForm(module models.ModuleConfig) (tea.Model, tea.Cmd) {
 	packageGroup := huh.NewGroup(
 		huh.NewInput().
 			Title("Common Packages").
-			Description("Packages available in both brew and apt with same name").
+			Description("Packages with same name on both macOS and Ubuntu").
 			Value(&commonPackages),
 	)
 
-	groups = append(groups, basicGroup, dependencyGroup, packageGroup)
+	// Commands group
+	commandGroup := huh.NewGroup(
+		huh.NewInput().
+			Title("Common Commands").
+			Description("Installation commands that work on all systems (optional)").
+			Value(&commonCommands),
+	)
+
+	// Initialize form data with existing specific packages and commands
+	specificPackages := []SpecificPackageForm{{}, {}}
+	specificCommands := []SpecificCommandForm{{}, {}}
+
+	// Load existing specific packages
+	for i, pkg := range module.Packages.Specific {
+		if i < 2 {
+			specificPackages[i] = SpecificPackageForm{
+				Name:    pkg.Name,
+				Manager: pkg.Manager,
+			}
+		}
+	}
+
+	// Load existing specific commands
+	specificCmdIndex := 0
+	for _, cmd := range module.Commands {
+		if cmd.OS != "" && specificCmdIndex < 2 {
+			specificCommands[specificCmdIndex] = SpecificCommandForm{
+				Command: cmd.Command,
+				OS:      cmd.OS,
+			}
+			specificCmdIndex++
+		}
+	}
+
+	// Specific packages group
+	specificPkgGroup := huh.NewGroup(
+		huh.NewInput().
+			Title("Specific Package 1 - Name").
+			Description("Package with different name on macOS vs Ubuntu").
+			Value(&specificPackages[0].Name),
+
+		huh.NewSelect[string]().
+			Title("Specific Package 1 - Manager").
+			Description("Package manager for this package").
+			Options(
+				huh.NewOption("None", ""),
+				huh.NewOption("Homebrew (macOS)", "brew"),
+				huh.NewOption("APT (Debian/Ubuntu)", "apt"),
+			).
+			Value(&specificPackages[0].Manager),
+
+		huh.NewInput().
+			Title("Specific Package 2 - Name").
+			Description("Another package with different name on macOS vs Ubuntu").
+			Value(&specificPackages[1].Name),
+
+		huh.NewSelect[string]().
+			Title("Specific Package 2 - Manager").
+			Description("Package manager for this package").
+			Options(
+				huh.NewOption("None", ""),
+				huh.NewOption("Homebrew (macOS)", "brew"),
+				huh.NewOption("APT (Debian/Ubuntu)", "apt"),
+			).
+			Value(&specificPackages[1].Manager),
+	)
+
+	// Specific commands group
+	specificCmdGroup := huh.NewGroup(
+		huh.NewInput().
+			Title("Specific Command 1 - Command").
+			Description("Command only for macOS or Ubuntu").
+			Value(&specificCommands[0].Command),
+
+		huh.NewSelect[string]().
+			Title("Specific Command 1 - OS").
+			Description("Operating system for this command").
+			Options(
+				huh.NewOption("None", ""),
+				huh.NewOption("Homebrew (macOS)", "brew"),
+				huh.NewOption("APT (Debian/Ubuntu)", "apt"),
+			).
+			Value(&specificCommands[0].OS),
+
+		huh.NewInput().
+			Title("Specific Command 2 - Command").
+			Description("Another command only for macOS or Ubuntu").
+			Value(&specificCommands[1].Command),
+
+		huh.NewSelect[string]().
+			Title("Specific Command 2 - OS").
+			Description("Operating system for this command").
+			Options(
+				huh.NewOption("None", ""),
+				huh.NewOption("Homebrew (macOS)", "brew"),
+				huh.NewOption("APT (Debian/Ubuntu)", "apt"),
+			).
+			Value(&specificCommands[1].OS),
+	)
+
+	groups = append(groups, basicGroup, dependencyGroup, packageGroup, commandGroup, specificPkgGroup, specificCmdGroup)
 
 	form := huh.NewForm(groups...).WithTheme(huh.ThemeCharm())
 
@@ -360,10 +529,13 @@ func (m Model) editModuleForm(module models.ModuleConfig) (tea.Model, tea.Cmd) {
 
 	// Store form variables for later use
 	m.editFormData = &EditFormData{
-		ModuleName:     module.Name,
-		Description:    &description,
-		Dependencies:   &dependencies,
-		CommonPackages: &commonPackages,
+		ModuleName:       module.Name,
+		Description:      &description,
+		Dependencies:     &dependencies,
+		CommonPackages:   &commonPackages,
+		CommonCommands:   &commonCommands,
+		SpecificPackages: specificPackages,
+		SpecificCommands: specificCommands,
 	}
 
 	return m, m.form.Init()
@@ -451,9 +623,7 @@ func (m Model) handleCreateModuleCompletion() (tea.Model, tea.Cmd) {
 	description := *data.Description
 	dependencies := *data.Dependencies
 	commonPackages := *data.CommonPackages
-	hasSpecific := *data.HasSpecific
-	specificName := *data.SpecificName
-	specificManager := *data.SpecificManager
+	commonCommands := *data.CommonCommands
 
 	// Validate required fields
 	if strings.TrimSpace(moduleName) == "" {
@@ -479,18 +649,42 @@ func (m Model) handleCreateModuleCompletion() (tea.Model, tea.Cmd) {
 		Common: commonPkgs,
 	}
 
-	// Add specific package if provided
-	if hasSpecific && strings.TrimSpace(specificName) != "" && strings.TrimSpace(specificManager) != "" {
-		packages.Specific = []models.SpecificPackage{
-			{
-				Name:    strings.TrimSpace(specificName),
-				Manager: strings.TrimSpace(specificManager),
-			},
+	// Add specific packages
+	for _, pkg := range data.SpecificPackages {
+		if strings.TrimSpace(pkg.Name) != "" && strings.TrimSpace(pkg.Manager) != "" && pkg.Manager != "" {
+			packages.Specific = append(packages.Specific, models.SpecificPackage{
+				Name:    strings.TrimSpace(pkg.Name),
+				Manager: strings.TrimSpace(pkg.Manager),
+			})
+		}
+	}
+
+	// Parse commands
+	var commands []models.InstallCommand
+	if strings.TrimSpace(commonCommands) != "" {
+		for _, cmd := range strings.Split(commonCommands, ";") {
+			cmd = strings.TrimSpace(cmd)
+			if cmd != "" {
+				commands = append(commands, models.InstallCommand{
+					Command: cmd,
+					OS:      "", // Empty means common
+				})
+			}
+		}
+	}
+
+	// Add specific commands
+	for _, cmd := range data.SpecificCommands {
+		if strings.TrimSpace(cmd.Command) != "" && strings.TrimSpace(cmd.OS) != "" && cmd.OS != "" {
+			commands = append(commands, models.InstallCommand{
+				Command: strings.TrimSpace(cmd.Command),
+				OS:      strings.TrimSpace(cmd.OS),
+			})
 		}
 	}
 
 	// Create the module
-	if err := m.manager.CreateModuleWithConfig(moduleName, description, dependencies, packages); err != nil {
+	if err := m.manager.CreateModuleWithConfig(moduleName, description, dependencies, packages, commands); err != nil {
 		m.error = err
 		m.form = nil
 		m.mode = ""
@@ -513,6 +707,7 @@ func (m Model) handleEditModuleCompletion() (tea.Model, tea.Cmd) {
 	description := *data.Description
 	dependencies := *data.Dependencies
 	commonPackages := *data.CommonPackages
+	commonCommands := *data.CommonCommands
 
 	// Parse common packages
 	var commonPkgs []string
@@ -527,11 +722,44 @@ func (m Model) handleEditModuleCompletion() (tea.Model, tea.Cmd) {
 
 	packages := models.PackageManager{
 		Common: commonPkgs,
-		// TODO: Handle existing specific packages
+	}
+
+	// Add specific packages from edit form
+	for _, pkg := range data.SpecificPackages {
+		if strings.TrimSpace(pkg.Name) != "" && strings.TrimSpace(pkg.Manager) != "" && pkg.Manager != "" {
+			packages.Specific = append(packages.Specific, models.SpecificPackage{
+				Name:    strings.TrimSpace(pkg.Name),
+				Manager: strings.TrimSpace(pkg.Manager),
+			})
+		}
+	}
+
+	// Parse commands
+	var commands []models.InstallCommand
+	if strings.TrimSpace(commonCommands) != "" {
+		for _, cmd := range strings.Split(commonCommands, ";") {
+			cmd = strings.TrimSpace(cmd)
+			if cmd != "" {
+				commands = append(commands, models.InstallCommand{
+					Command: cmd,
+					OS:      "", // Empty means common
+				})
+			}
+		}
+	}
+
+	// Add specific commands
+	for _, cmd := range data.SpecificCommands {
+		if strings.TrimSpace(cmd.Command) != "" && strings.TrimSpace(cmd.OS) != "" {
+			commands = append(commands, models.InstallCommand{
+				Command: strings.TrimSpace(cmd.Command),
+				OS:      strings.TrimSpace(cmd.OS),
+			})
+		}
 	}
 
 	// Update the module
-	if err := m.manager.UpdateModule(moduleName, description, dependencies, packages); err != nil {
+	if err := m.manager.UpdateModule(moduleName, description, dependencies, packages, commands); err != nil {
 		m.error = err
 		m.form = nil
 		m.mode = ""

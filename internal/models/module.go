@@ -10,6 +10,11 @@ type SpecificPackage struct {
 	Manager string `yaml:"manager"` // brew, apt, pacman, yum, snap
 }
 
+type InstallCommand struct {
+	Command string `yaml:"command"`
+	OS      string `yaml:"os"` // brew, apt, pacman, yum, snap, or empty for common
+}
+
 type PackageManager struct {
 	Common   []string          `yaml:"common,omitempty"`   // Packages with same name across managers
 	Specific []SpecificPackage `yaml:"specific,omitempty"` // Packages with different names or specific managers
@@ -20,6 +25,7 @@ type ModuleConfig struct {
 	Description  string           `yaml:"description"`
 	Dependencies []string         `yaml:"dependencies"`
 	Packages     PackageManager   `yaml:"packages,omitempty"`
+	Commands     []InstallCommand `yaml:"commands,omitempty"` // Custom installation commands
 	Dotfiles     []DotfileMapping `yaml:"dotfiles"`
 	Path         string           `yaml:"-"`
 }
