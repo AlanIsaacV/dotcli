@@ -45,9 +45,3 @@ type InstallationStatus struct {
 	Error    error
 	Progress float64
 }
-
-type PackageStatus struct {
-	Name      string
-	Installed bool
-	Version   string
-}

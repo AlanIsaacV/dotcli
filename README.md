@@ -9,7 +9,6 @@ A TUI-based dotfiles manager with intelligent package management and dependency 
 - **Dependency Resolution** - handles module dependencies automatically
 - **Package Verification** - skips already installed packages
 - **Module Creation** - built-in forms for creating new modules
-- **Force Reinstall** - option to reinstall existing packages
 - **Export Mode** - install only dotfiles without packages/commands
 
 ## Quick Start
@@ -27,7 +26,6 @@ go build -o bin/dotcli .
 ### Interactive Interface
 - `↑/↓` - Navigate modules
 - `Space` - Select/deselect modules
-- `f` - Toggle force reinstall
 - `x` - Toggle export mode (dotfiles only)
 - `c` - Create new module
 - `e` - Edit existing module

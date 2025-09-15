@@ -93,7 +93,7 @@ func (i *Installer) InstallModuleWithOptions(module models.ModuleConfig, statusC
 			Module: module.Name,
 			Status: "Installing packages",
 		}
-		if err := i.installPackagesWithOptions(module, statusCh, options); err != nil {
+		if err := i.installPackages(module, statusCh); err != nil {
 			statusCh <- models.InstallationStatus{
 				Module: module.Name,
 				Status: "Failed to install packages",
@@ -186,10 +186,6 @@ func (i *Installer) InstallModuleWithOptions(module models.ModuleConfig, statusC
 }
 
 func (i *Installer) installPackages(module models.ModuleConfig, statusCh chan<- models.InstallationStatus) error {
-	return i.installPackagesWithOptions(module, statusCh, models.InstallOptions{})
-}
-
-func (i *Installer) installPackagesWithOptions(module models.ModuleConfig, statusCh chan<- models.InstallationStatus, options models.InstallOptions) error {
 	if i.hasNoPackages(module.Packages) {
 		return nil
 	}
@@ -219,40 +215,20 @@ func (i *Installer) installPackagesWithOptions(module models.ModuleConfig, statu
 		return nil
 	}
 
-	// Check which packages are already installed
-	packageStatus := i.checkPackagesStatus(pm, packages)
-	var toInstall []string
-	var alreadyInstalled []string
-
-	for _, status := range packageStatus {
-		if status.Installed && !options.ForceReinstall {
-			alreadyInstalled = append(alreadyInstalled, fmt.Sprintf("%s (%s)", status.Name, status.Version))
-		} else {
-			toInstall = append(toInstall, status.Name)
-		}
-	}
-
-	if len(alreadyInstalled) > 0 {
+	if len(packages) == 0 {
 		statusCh <- models.InstallationStatus{
 			Module: module.Name,
-			Status: fmt.Sprintf("Already installed: %s", strings.Join(alreadyInstalled, ", ")),
-		}
-	}
-
-	if len(toInstall) == 0 {
-		statusCh <- models.InstallationStatus{
-			Module: module.Name,
-			Status: "All packages already installed",
+			Status: fmt.Sprintf("No packages defined for %s", pm),
 		}
 		return nil
 	}
 
 	statusCh <- models.InstallationStatus{
 		Module: module.Name,
-		Status: fmt.Sprintf("Installing packages via %s: %s", pm, strings.Join(toInstall, ", ")),
+		Status: fmt.Sprintf("Installing packages via %s: %s", pm, strings.Join(packages, ", ")),
 	}
 
-	return i.installWithPackageManager(pm, toInstall, statusCh, module.Name)
+	return i.installWithPackageManager(pm, packages, statusCh, module.Name)
 }
 
 func (i *Installer) hasNoPackages(pm models.PackageManager) bool {
@@ -274,66 +250,6 @@ func (i *Installer) detectPackageManager() string {
 func (i *Installer) commandExists(cmd string) bool {
 	_, err := exec.LookPath(cmd)
 	return err == nil
-}
-
-func (i *Installer) isPackageInstalled(pm string, pkg string) (bool, string) {
-	var cmd *exec.Cmd
-
-	switch pm {
-	case "brew":
-		cmd = exec.Command("brew", "list", "--versions", pkg)
-	case "apt":
-		cmd = exec.Command("dpkg-query", "-W", "-f=${Status} ${Version}", pkg)
-	default:
-		return false, ""
-	}
-
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return false, ""
-	}
-
-	outputStr := strings.TrimSpace(string(output))
-
-	switch pm {
-	case "brew":
-		// brew list --versions returns: "package 1.2.3"
-		if outputStr != "" && strings.Contains(outputStr, pkg) {
-			parts := strings.Fields(outputStr)
-			if len(parts) >= 2 {
-				return true, parts[1]
-			}
-			return true, "installed"
-		}
-		return false, ""
-	case "apt":
-		// dpkg-query returns: "install ok installed 1.2.3"
-		if strings.Contains(outputStr, "install ok installed") {
-			parts := strings.Fields(outputStr)
-			if len(parts) >= 4 {
-				return true, parts[3]
-			}
-			return true, "installed"
-		}
-		return false, ""
-	}
-
-	return false, ""
-}
-
-func (i *Installer) checkPackagesStatus(pm string, packages []string) []models.PackageStatus {
-	var status []models.PackageStatus
-
-	for _, pkg := range packages {
-		installed, version := i.isPackageInstalled(pm, pkg)
-		status = append(status, models.PackageStatus{
-			Name:      pkg,
-			Installed: installed,
-			Version:   version,
-		})
-	}
-
-	return status
 }
 
 func (i *Installer) installWithPackageManager(pm string, packages []string, statusCh chan<- models.InstallationStatus, moduleName string) error {

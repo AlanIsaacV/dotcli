@@ -16,7 +16,6 @@ type Model struct {
 	modules        []models.ModuleState
 	cursor         int
 	selected       map[string]bool
-	forceReinstall bool
 	exportMode     bool
 	quitting       bool
 	shouldInstall  bool
@@ -160,9 +159,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.quitting = true
 				return m, tea.Quit
 			}
-
-		case "f":
-			m.forceReinstall = !m.forceReinstall
 
 		case "x":
 			m.exportMode = !m.exportMode
@@ -1036,13 +1032,6 @@ func (m Model) View() string {
 	}
 
 	s.WriteString("\n")
-	forceText := ""
-	if m.forceReinstall {
-		forceText = " • f: force ON"
-	} else {
-		forceText = " • f: force OFF"
-	}
-
 	exportText := ""
 	if m.exportMode {
 		exportText = " • x: export ON"
@@ -1050,14 +1039,11 @@ func (m Model) View() string {
 		exportText = " • x: export OFF"
 	}
 
-	s.WriteString(helpStyle.Render("↑/↓: navigate • space: select • c: create • e: edit • a: add dotfile • i: import dotfile • enter: install" + forceText + exportText + " • q: quit"))
+	s.WriteString(helpStyle.Render("↑/↓: navigate • space: select • c: create • e: edit • a: add dotfile • i: import dotfile • enter: install" + exportText + " • q: quit"))
 
 	if len(m.selected) > 0 {
 		s.WriteString("\n\n")
 		statusText := fmt.Sprintf("Selected %d modules", len(m.selected))
-		if m.forceReinstall {
-			statusText += " (force reinstall)"
-		}
 		if m.exportMode {
 			statusText += " (dotfiles only)"
 		}
@@ -1077,10 +1063,6 @@ func (m Model) GetSelected() []string {
 		selected = append(selected, name)
 	}
 	return selected
-}
-
-func (m Model) GetForceReinstall() bool {
-	return m.forceReinstall
 }
 
 func (m Model) GetExportMode() bool {

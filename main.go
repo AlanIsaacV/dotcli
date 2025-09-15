@@ -54,14 +54,10 @@ func main() {
 
 	if finalModel.(ui.Model).ShouldInstall() {
 		selected := finalModel.(ui.Model).GetSelected()
-		forceReinstall := finalModel.(ui.Model).GetForceReinstall()
 		exportMode := finalModel.(ui.Model).GetExportMode()
 
 		if len(selected) > 0 {
 			fmt.Printf("\n🚀 Installing %d modules...\n", len(selected))
-			if forceReinstall {
-				fmt.Println("⚡ Force reinstall enabled - will reinstall even if packages exist")
-			}
 			if exportMode {
 				fmt.Println("📄 Export mode - will only install dotfiles")
 			}
@@ -99,10 +95,7 @@ func main() {
 						if exportMode {
 							err = installer.InstallDotfilesOnly(module, statusCh)
 						} else {
-							options := models.InstallOptions{
-								ForceReinstall: forceReinstall,
-							}
-							err = installer.InstallModuleWithOptions(module, statusCh, options)
+							err = installer.InstallModule(module, statusCh)
 						}
 						if err != nil {
 							statusCh <- models.InstallationStatus{
