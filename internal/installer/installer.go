@@ -514,3 +514,35 @@ func (i *Installer) GetInstallationOrder(modules []models.ModuleConfig, selected
 
 	return i.ResolveDependencies(modules, allSelected)
 }
+
+func (i *Installer) InstallDotfilesOnly(module models.ModuleConfig, statusCh chan<- models.InstallationStatus) error {
+	statusCh <- models.InstallationStatus{
+		Module:   module.Name,
+		Status:   "Installing dotfiles only",
+		Progress: 0.0,
+	}
+
+	// Only create symlinks
+	if len(module.Dotfiles) > 0 {
+		statusCh <- models.InstallationStatus{
+			Module: module.Name,
+			Status: "Creating symlinks",
+		}
+		if err := i.createSymlinks(module); err != nil {
+			statusCh <- models.InstallationStatus{
+				Module: module.Name,
+				Status: "Failed to create symlinks",
+				Error:  err,
+			}
+			return err
+		}
+	}
+
+	statusCh <- models.InstallationStatus{
+		Module:   module.Name,
+		Status:   "Dotfiles installation completed",
+		Progress: 1.0,
+	}
+
+	return nil
+}

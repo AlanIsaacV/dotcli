@@ -55,11 +55,15 @@ func main() {
 	if finalModel.(ui.Model).ShouldInstall() {
 		selected := finalModel.(ui.Model).GetSelected()
 		forceReinstall := finalModel.(ui.Model).GetForceReinstall()
+		exportMode := finalModel.(ui.Model).GetExportMode()
 
 		if len(selected) > 0 {
 			fmt.Printf("\n🚀 Installing %d modules...\n", len(selected))
 			if forceReinstall {
 				fmt.Println("⚡ Force reinstall enabled - will reinstall even if packages exist")
+			}
+			if exportMode {
+				fmt.Println("📄 Export mode - will only install dotfiles")
 			}
 			fmt.Println("📋 Installation order:")
 
@@ -89,13 +93,18 @@ func main() {
 					moduleMap[module.Name] = module
 				}
 
-				options := models.InstallOptions{
-					ForceReinstall: forceReinstall,
-				}
-
 				for _, moduleName := range installOrder {
 					if module, exists := moduleMap[moduleName]; exists {
-						if err := installer.InstallModuleWithOptions(module, statusCh, options); err != nil {
+						var err error
+						if exportMode {
+							err = installer.InstallDotfilesOnly(module, statusCh)
+						} else {
+							options := models.InstallOptions{
+								ForceReinstall: forceReinstall,
+							}
+							err = installer.InstallModuleWithOptions(module, statusCh, options)
+						}
+						if err != nil {
 							statusCh <- models.InstallationStatus{
 								Module: moduleName,
 								Status: fmt.Sprintf("Installation failed: %v", err),
@@ -124,7 +133,11 @@ func main() {
 				os.Exit(1)
 			} else {
 				fmt.Println("\n🎉 Installation completed successfully!")
-				fmt.Println("💡 You may need to restart your terminal or reload your shell configuration.")
+				if exportMode {
+					fmt.Println("💡 Your dotfiles have been deployed. Configurations are now active!")
+				} else {
+					fmt.Println("💡 You may need to restart your terminal or reload your shell configuration.")
+				}
 			}
 		}
 	}

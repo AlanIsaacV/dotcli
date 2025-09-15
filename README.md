@@ -10,6 +10,7 @@ A TUI-based dotfiles manager with intelligent package management and dependency 
 - **Package Verification** - skips already installed packages
 - **Module Creation** - built-in forms for creating new modules
 - **Force Reinstall** - option to reinstall existing packages
+- **Export Mode** - install only dotfiles without packages/commands
 
 ## Quick Start
 
@@ -27,6 +28,7 @@ go build -o bin/dotcli .
 - `↑/↓` - Navigate modules
 - `Space` - Select/deselect modules
 - `f` - Toggle force reinstall
+- `x` - Toggle export mode (dotfiles only)
 - `c` - Create new module
 - `e` - Edit existing module
 - `a` - Add dotfile to module
@@ -51,8 +53,15 @@ description: "My application configuration"
 dependencies:
   - shell
 packages:
-  brew: [myapp, helper-tool]
-  apt: [myapp, helper-tool]
+  common: [git, curl]
+  specific:
+    - name: myapp
+      manager: brew
+    - name: myapp
+      manager: apt
+commands:
+  - command: "echo 'Custom setup command'"
+    os: ""
 dotfiles:
   - source: dotfiles/.config
     destination: ~/.config/myapp
@@ -70,6 +79,12 @@ When you import an existing file (e.g., `~/.bashrc`):
 2. Original file is removed
 3. Symlink is created from original location to module file
 4. Configuration is updated automatically
+
+### Export Mode
+Perfect for when software is already installed and you just want to apply your configurations:
+1. Press `x` to enable export mode
+2. Select modules with `Space`
+3. Press `Enter` to install only dotfiles (skips packages and commands)
 
 ### Path Expansion
 The system supports various path formats:
