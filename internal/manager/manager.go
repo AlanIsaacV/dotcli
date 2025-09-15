@@ -293,13 +293,43 @@ func (m *Manager) ImportDotfile(moduleName, sourcePath string) error {
 		return fmt.Errorf("source file does not exist: %s", sourcePath)
 	}
 
+	// Check if source is already a symlink pointing to our module
+	if linkTarget, err := os.Readlink(sourcePath); err == nil {
+		// It's already a symlink, check if it points to our module
+		if strings.Contains(linkTarget, modulePath) {
+			return fmt.Errorf("file is already managed by this module")
+		}
+	}
+
 	// Determine destination in module
 	basename := filepath.Base(sourcePath)
 	moduleDestPath := filepath.Join(modulePath, "dotfiles", basename)
 
+	// Check if file already exists in module
+	if _, err := os.Stat(moduleDestPath); err == nil {
+		return fmt.Errorf("file already exists in module: %s", basename)
+	}
+
 	// Copy file to module
 	if err := m.copyFile(sourcePath, moduleDestPath); err != nil {
 		return fmt.Errorf("failed to copy file: %w", err)
+	}
+
+	// Remove original file
+	if err := os.Remove(sourcePath); err != nil {
+		return fmt.Errorf("failed to remove original file: %w", err)
+	}
+
+	// Create symlink from original location to module
+	absModuleDestPath, err := filepath.Abs(moduleDestPath)
+	if err != nil {
+		return fmt.Errorf("failed to get absolute path: %w", err)
+	}
+
+	if err := os.Symlink(absModuleDestPath, sourcePath); err != nil {
+		// Try to restore original file if symlink creation fails
+		m.copyFile(absModuleDestPath, sourcePath)
+		return fmt.Errorf("failed to create symlink: %w", err)
 	}
 
 	// Add to config
@@ -350,6 +380,131 @@ func (m *Manager) expandPath(path string) string {
 	}
 
 	return expanded
+}
+
+func (m *Manager) ImportDotfileWithDestination(moduleName, sourcePath, destinationPath string) error {
+	modulePath := filepath.Join(m.modulesPath, moduleName)
+
+	if _, err := os.Stat(modulePath); os.IsNotExist(err) {
+		return fmt.Errorf("module '%s' does not exist", moduleName)
+	}
+
+	// Expand source path
+	sourcePath = m.expandPath(sourcePath)
+
+	sourcePath, err := filepath.Abs(sourcePath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve source path: %w", err)
+	}
+
+	if _, err := os.Stat(sourcePath); os.IsNotExist(err) {
+		return fmt.Errorf("source file does not exist: %s", sourcePath)
+	}
+
+	// Check if source is already a symlink pointing to our module
+	if linkTarget, err := os.Readlink(sourcePath); err == nil {
+		if strings.Contains(linkTarget, modulePath) {
+			return fmt.Errorf("file is already managed by this module")
+		}
+	}
+
+	// Determine destination in module based on provided destination path
+	moduleDestPath := filepath.Join(modulePath, "dotfiles", destinationPath)
+
+	// Check if file already exists in module
+	if _, err := os.Stat(moduleDestPath); err == nil {
+		return fmt.Errorf("file already exists in module: %s", destinationPath)
+	}
+
+	// Create directory structure if needed
+	moduleDestDir := filepath.Dir(moduleDestPath)
+	if err := os.MkdirAll(moduleDestDir, 0755); err != nil {
+		return fmt.Errorf("failed to create module directory structure: %w", err)
+	}
+
+	// Handle both files and directories
+	fileInfo, err := os.Stat(sourcePath)
+	if err != nil {
+		return fmt.Errorf("failed to get file info: %w", err)
+	}
+
+	if fileInfo.IsDir() {
+		// Copy directory recursively
+		if err := m.copyDir(sourcePath, moduleDestPath); err != nil {
+			return fmt.Errorf("failed to copy directory: %w", err)
+		}
+	} else {
+		// Copy single file
+		if err := m.copyFile(sourcePath, moduleDestPath); err != nil {
+			return fmt.Errorf("failed to copy file: %w", err)
+		}
+	}
+
+	// Remove original file/directory
+	if err := os.RemoveAll(sourcePath); err != nil {
+		return fmt.Errorf("failed to remove original: %w", err)
+	}
+
+	// Create symlink from original location to module
+	absModuleDestPath, err := filepath.Abs(moduleDestPath)
+	if err != nil {
+		return fmt.Errorf("failed to get absolute path: %w", err)
+	}
+
+	if err := os.Symlink(absModuleDestPath, sourcePath); err != nil {
+		// Try to restore original file/directory if symlink creation fails
+		if fileInfo.IsDir() {
+			m.copyDir(absModuleDestPath, sourcePath)
+		} else {
+			m.copyFile(absModuleDestPath, sourcePath)
+		}
+		return fmt.Errorf("failed to create symlink: %w", err)
+	}
+
+	// Calculate relative destination path for config
+	homeDir, _ := os.UserHomeDir()
+	relativeDest, _ := filepath.Rel(homeDir, sourcePath)
+	relativeSource := filepath.Join("dotfiles", destinationPath)
+
+	// Add to config
+	if err := m.AddDotfile(moduleName, relativeSource, relativeDest); err != nil {
+		return fmt.Errorf("failed to add to config: %w", err)
+	}
+
+	return nil
+}
+
+func (m *Manager) copyDir(src, dst string) error {
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(dst, srcInfo.Mode()); err != nil {
+		return err
+	}
+
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+
+		if entry.IsDir() {
+			if err := m.copyDir(srcPath, dstPath); err != nil {
+				return err
+			}
+		} else {
+			if err := m.copyFile(srcPath, dstPath); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
 
 func (m *Manager) copyFile(src, dst string) error {

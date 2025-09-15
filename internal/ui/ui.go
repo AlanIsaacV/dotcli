@@ -29,6 +29,7 @@ type Model struct {
 	createFormData *CreateFormData
 	editFormData   *EditFormData
 	addFormData    *AddFormData
+	importFormData *ImportFormData
 }
 
 type CreateFormData struct {
@@ -55,6 +56,12 @@ type AddFormData struct {
 	ModuleChoice *string
 	Source       *string
 	Destination  *string
+}
+
+type ImportFormData struct {
+	ModuleChoice    *string
+	SourcePath      *string
+	DestinationPath *string
 }
 
 type SpecificPackageForm struct {
@@ -171,6 +178,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "a":
 			m.error = nil
 			return m.addDotfileForm()
+
+		case "i":
+			m.error = nil
+			return m.importDotfileForm()
 
 		case "esc":
 			if m.form != nil {
@@ -592,6 +603,57 @@ func (m Model) addDotfileForm() (tea.Model, tea.Cmd) {
 	return m, m.form.Init()
 }
 
+func (m Model) importDotfileForm() (tea.Model, tea.Cmd) {
+	if len(m.modules) == 0 {
+		m.error = fmt.Errorf("no modules available. Create a module first")
+		return m, nil
+	}
+
+	// Form data variables
+	var (
+		moduleChoice    string
+		sourcePath      string
+		destinationPath string
+	)
+
+	var moduleOptions []huh.Option[string]
+	for _, module := range m.modules {
+		moduleOptions = append(moduleOptions, huh.NewOption(module.Config.Name, module.Config.Name))
+	}
+
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Select Module").
+				Description("Choose which module to import the dotfile to").
+				Options(moduleOptions...).
+				Value(&moduleChoice),
+
+			huh.NewInput().
+				Title("Source Path").
+				Description("Path to existing file/directory (e.g., ~/.bashrc, ~/.config/nvim)").
+				Value(&sourcePath),
+
+			huh.NewInput().
+				Title("Destination Path").
+				Description("Path within module dotfiles directory (e.g., .bashrc, nvim/)").
+				Value(&destinationPath),
+		),
+	).WithTheme(huh.ThemeCharm())
+
+	m.form = form
+	m.mode = "import"
+
+	// Store form variables for later use
+	m.importFormData = &ImportFormData{
+		ModuleChoice:    &moduleChoice,
+		SourcePath:      &sourcePath,
+		DestinationPath: &destinationPath,
+	}
+
+	return m, m.form.Init()
+}
+
 func (m Model) handleFormCompletion() (tea.Model, tea.Cmd) {
 	switch m.mode {
 	case "create":
@@ -605,6 +667,10 @@ func (m Model) handleFormCompletion() (tea.Model, tea.Cmd) {
 	case "add":
 		if m.addFormData != nil {
 			return m.handleAddDotfileCompletion()
+		}
+	case "import":
+		if m.importFormData != nil {
+			return m.handleImportDotfileCompletion()
 		}
 	}
 	return m, nil
@@ -812,6 +878,49 @@ func (m Model) handleAddDotfileCompletion() (tea.Model, tea.Cmd) {
 	return m.reloadModules()
 }
 
+func (m Model) handleImportDotfileCompletion() (tea.Model, tea.Cmd) {
+	if m.importFormData == nil {
+		m.error = fmt.Errorf("form data not available")
+		m.form = nil
+		m.mode = ""
+		return m, nil
+	}
+
+	data := m.importFormData
+	moduleChoice := *data.ModuleChoice
+	sourcePath := *data.SourcePath
+	destinationPath := *data.DestinationPath
+
+	// Validate required fields
+	if strings.TrimSpace(moduleChoice) == "" {
+		m.error = fmt.Errorf("module selection is required")
+		m.form = nil
+		m.mode = ""
+		return m, nil
+	}
+	if strings.TrimSpace(sourcePath) == "" {
+		m.error = fmt.Errorf("source path is required")
+		m.form = nil
+		m.mode = ""
+		return m, nil
+	}
+	if strings.TrimSpace(destinationPath) == "" {
+		m.error = fmt.Errorf("destination path is required")
+		m.form = nil
+		m.mode = ""
+		return m, nil
+	}
+
+	if err := m.manager.ImportDotfileWithDestination(moduleChoice, sourcePath, destinationPath); err != nil {
+		m.error = err
+		m.form = nil
+		m.mode = ""
+		return m, nil
+	}
+
+	return m.reloadModules()
+}
+
 func (m Model) reloadModules() (tea.Model, tea.Cmd) {
 	modules, err := m.scanner.ScanModules()
 	if err != nil {
@@ -929,7 +1038,7 @@ func (m Model) View() string {
 	} else {
 		forceText = " • f: force OFF"
 	}
-	s.WriteString(helpStyle.Render("↑/↓: navigate • space: select • c: create • e: edit • a: add dotfile • enter: install" + forceText + " • q: quit"))
+	s.WriteString(helpStyle.Render("↑/↓: navigate • space: select • c: create • e: edit • a: add dotfile • i: import dotfile • enter: install" + forceText + " • q: quit"))
 
 	if len(m.selected) > 0 {
 		s.WriteString("\n\n")

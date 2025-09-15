@@ -28,7 +28,9 @@ go build -o bin/dotcli .
 - `Space` - Select/deselect modules
 - `f` - Toggle force reinstall
 - `c` - Create new module
+- `e` - Edit existing module
 - `a` - Add dotfile to module
+- `i` - Import existing dotfile
 - `Enter` - Install selected modules
 - `q` - Quit
 
@@ -53,8 +55,28 @@ packages:
   apt: [myapp, helper-tool]
 dotfiles:
   - source: dotfiles/.config
-    destination: .config/myapp
+    destination: ~/.config/myapp
 ```
+
+## Working with Dotfiles
+
+### Adding Dotfiles to Modules
+1. **Add new dotfile mapping** (`a`): Define source and destination paths
+2. **Import existing files** (`i`): Move existing config files into your dotfiles and create symlinks
+
+### Import Process
+When you import an existing file (e.g., `~/.bashrc`):
+1. File is copied to your module's dotfiles directory
+2. Original file is removed
+3. Symlink is created from original location to module file
+4. Configuration is updated automatically
+
+### Path Expansion
+The system supports various path formats:
+- `~/.bashrc` - Home directory expansion
+- `$HOME/.config/nvim` - Environment variable expansion
+- `.bashrc` - Relative to home directory
+- `/absolute/path` - Absolute paths
 
 ## Templates
 
