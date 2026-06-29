@@ -2,6 +2,19 @@
 
 A TUI-based dotfiles manager with intelligent package management and dependency resolution.
 
+At a glance — DotCLI scans your modules, lets you pick them in a TUI, resolves their
+dependencies, and installs each one (packages, scripts/commands, and dotfile symlinks):
+
+```mermaid
+flowchart LR
+    disk[("~/dotfiles/modules<br/>config.yaml · install.sh · dotfiles/")]
+    disk -->|scan| tui["Interactive TUI<br/>browse · select · create/edit"]
+    tui -->|resolve deps| order["Install order<br/>(topological)"]
+    order --> pkgs["Packages<br/>brew / apt"]
+    order --> scripts["install.sh<br/>+ custom commands"]
+    order --> links["Dotfile symlinks<br/>→ $HOME"]
+```
+
 ## Features
 
 - **Interactive TUI** for module selection and management

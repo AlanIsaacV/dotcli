@@ -26,6 +26,22 @@ shows "(dotfiles only)".
 
 ## Data flow
 
+Dependencies are still resolved the same way, but each module runs the symlink-only
+path — no packages, `install.sh`, or commands:
+
+```mermaid
+flowchart LR
+    x(["x — toggle exportMode"]) --> sel["select modules + Enter"]
+    sel --> order["GetInstallationOrder<br/>(deps still resolved)"]
+    order --> loop{"for each module"}
+    loop --> dot["InstallDotfilesOnly"]
+    dot --> sym{"has dotfiles?"}
+    sym -->|yes| links["createSymlinks only"]
+    sym -->|no| noop["no-op, complete"]
+    links --> loop
+    noop --> loop
+```
+
 1. `x` flips `Model.exportMode`.
 2. On install, `main.go` reads `GetExportMode()`. Dependency ordering is still computed
    the same way (`GetInstallationOrder`).

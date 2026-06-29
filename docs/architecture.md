@@ -26,6 +26,34 @@ single-user developer tool — not a service. [INFERRED]
 └── README.md
 ```
 
+How the packages depend on each other and on the filesystem (dotted = uses the
+shared types in `models`):
+
+```mermaid
+flowchart TD
+    main["main.go — entrypoint + install loop"]
+    ui["internal/ui — Bubble Tea model + huh forms"]
+    scanner["internal/scanner — discover & parse modules"]
+    manager["internal/manager — create/edit, dotfiles, templates"]
+    installer["internal/installer — deps + install pipeline"]
+    models["internal/models — shared data types"]
+    disk[("~/dotfiles/modules")]
+
+    main --> scanner
+    main --> manager
+    main --> ui
+    main --> installer
+    ui --> manager
+    ui --> scanner
+    scanner --> disk
+    manager --> disk
+    installer --> disk
+    scanner -.-> models
+    manager -.-> models
+    installer -.-> models
+    ui -.-> models
+```
+
 Module descriptions:
 
 - **`main.go`** — Resolves the dotfiles root (`DOTFILES_PATH` env override, else
@@ -69,6 +97,40 @@ A module on disk is the directory + `config.yaml` + optional `install.sh` +
 a `dotfiles/` subtree. There is no database; the filesystem is the source of truth.
 
 ## Internal data flow
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Main as main.go
+    participant Scanner as scanner
+    participant UI as ui
+    participant Manager as manager
+    participant Installer as installer
+    participant FS as filesystem
+
+    Main->>Scanner: ScanModules()
+    Scanner->>FS: read modules/*/config.yaml
+    Scanner-->>Main: []ModuleConfig
+    Main->>UI: run Bubble Tea program
+
+    loop browse / edit
+        User->>UI: navigate, toggle, create/edit/add/import
+        UI->>Manager: mutate module
+        Manager->>FS: write config.yaml / move files / symlink
+        UI->>Scanner: reload modules
+    end
+
+    User->>UI: Enter (install), then quit
+    UI-->>Main: ShouldInstall / GetSelected / GetExportMode
+    Main->>Installer: GetInstallationOrder(modules, selected)
+    Installer-->>Main: ordered module names
+
+    loop each module (goroutine)
+        Main->>Installer: InstallModule / InstallDotfilesOnly
+        Installer->>FS: packages, install.sh, commands, symlinks
+        Installer-->>Main: InstallationStatus (channel)
+    end
+```
 
 1. **Startup** (`main.go`): resolve dotfiles path → ensure `modules/` exists →
    `scanner.ScanModules()` → build `ui.Model` → run Bubble Tea program (alt screen).

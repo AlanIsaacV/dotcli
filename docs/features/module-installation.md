@@ -28,6 +28,28 @@ with at least one module selected.
 
 ## Data flow
 
+```mermaid
+flowchart TD
+    enter(["User presses Enter"]) --> order["GetInstallationOrder<br/>add missing deps"]
+    order --> resolve["ResolveDependencies<br/>DFS topological sort"]
+    resolve -->|cycle| cyc[/"circular dependency detected"/]
+    resolve -->|missing dep| miss[/"module not found"/]
+    resolve --> loop{"for each module<br/>in order"}
+    loop --> exp{"export mode?"}
+    exp -->|yes| dotonly["InstallDotfilesOnly<br/>(symlinks only)"]
+    exp -->|no| full["InstallModuleWithOptions"]
+    full --> pkg["1. install packages (brew/apt)"]
+    pkg --> script["2. run install.sh"]
+    script --> cmds["3. run custom commands"]
+    cmds --> links["4. create symlinks"]
+    dotonly --> status["emit InstallationStatus"]
+    links --> status
+    status --> err{"error?"}
+    err -->|yes| abort[/"print ❌ and exit 1"/]
+    err -->|no| loop
+    loop -->|all done| ok[/"🎉 completed"/]
+```
+
 1. User presses `Enter` → `ui` sets `shouldInstall=true`, quits the program.
 2. `main.go` calls `GetInstallationOrder(modules, selected)`, which adds any missing
    dependencies of the selection and then `ResolveDependencies` does a DFS topological

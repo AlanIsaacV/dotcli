@@ -45,6 +45,23 @@ rejects a duplicate `source+destination`, appends the mapping, rewrites the conf
    restore-copy if the symlink step fails).
 5. Compute a home-relative `destination` and call `AddDotfile` to register it.
 
+The destructive window is between **remove original** and **create symlink** — a crash
+there leaves the file living only inside the module:
+
+```mermaid
+flowchart TD
+    start(["i — import a path"]) --> expand["expand + absolutize source"]
+    expand --> check{"exists & not<br/>already managed?"}
+    check -->|no| err1[/"error: not found /<br/>already managed"/]
+    check -->|yes| copy["copy into module<br/>dotfiles/&lt;dest&gt;"]
+    copy --> remove["⚠️ os.RemoveAll original"]
+    remove --> symlink["create symlink:<br/>original → module"]
+    symlink -->|ok| register["AddDotfile —<br/>register in config.yaml"]
+    symlink -->|fail| restore["best-effort restore copy"]
+    register --> done(["now managed by DotCLI"])
+    restore --> err2[/"return error"/]
+```
+
 ## Edge cases
 
 - **Import is destructive**: the original is deleted between the copy and the symlink. If

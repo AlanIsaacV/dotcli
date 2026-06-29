@@ -29,6 +29,19 @@ built-in starter templates (`basic`, `shell`, `editor`, `cli-tool`). Create is b
 
 ## Data flow
 
+```mermaid
+flowchart LR
+    key(["c (create) / e (edit)"]) --> form["build huh.Form,<br/>store on Model"]
+    form --> upd["form.Update per keystroke"]
+    upd --> done{"StateCompleted?"}
+    done -->|no| upd
+    done -->|yes| handle["handleFormCompletion"]
+    handle --> parse["parse fields →<br/>ModuleConfig"]
+    parse --> mgr["CreateModuleWithConfig /<br/>UpdateModule"]
+    mgr --> write["write config.yaml<br/>(+ install.sh if commands)"]
+    write --> reload["reloadModules —<br/>re-scan disk"]
+```
+
 1. `c`/`e` → builds a `huh.Form`, stores it on `Model.form` and `Model.mode`.
 2. Each keystroke routes to `form.Update`; on `StateCompleted`, `handleFormCompletion`
    dispatches by mode to `handleCreateModuleCompletion` / `handleEditModuleCompletion`.
