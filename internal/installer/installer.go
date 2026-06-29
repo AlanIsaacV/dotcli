@@ -265,14 +265,14 @@ func (i *Installer) installWithPackageManager(pm string, packages []string, stat
 			Module: moduleName,
 			Status: "Updating package list (apt update)",
 		}
-		updateCmd := exec.Command("sudo", "apt", "update")
+		updateCmd := exec.Command("sudo", "apt-get", "update")
 		if err := updateCmd.Run(); err != nil {
 			statusCh <- models.InstallationStatus{
 				Module: moduleName,
 				Status: "Warning: apt update failed, continuing...",
 			}
 		}
-		cmd = exec.Command("sudo", append([]string{"apt", "install", "-y"}, packages...)...)
+		cmd = exec.Command("sudo", append([]string{"apt-get", "install", "-y"}, packages...)...)
 	default:
 		return fmt.Errorf("unsupported package manager: %s", pm)
 	}
