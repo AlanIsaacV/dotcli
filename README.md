@@ -5,7 +5,7 @@ A TUI-based dotfiles manager with intelligent package management and dependency 
 ## Features
 
 - **Interactive TUI** for module selection and management
-- **Package Manager Integration** - automatically detects and uses brew/apt/pacman/yum/snap
+- **Package Manager Integration** - automatically detects and uses **brew** or **apt**
 - **Dependency Resolution** - handles module dependencies automatically
 - **Package Verification** - skips already installed packages
 - **Module Creation** - built-in forms for creating new modules
@@ -19,6 +19,16 @@ go build -o bin/dotcli .
 
 # Run
 ./bin/dotcli
+```
+
+## Configuration
+
+By default DotCLI manages modules under `~/dotfiles/modules/` (created on first run).
+Override the root directory with the `DOTFILES_PATH` environment variable — handy for
+testing against a throwaway location:
+
+```bash
+DOTFILES_PATH=/tmp/my-dotfiles ./bin/dotcli
 ```
 
 ## Usage
@@ -39,7 +49,7 @@ go build -o bin/dotcli .
 
 ### Module Structure
 ```
-~/.dotfiles/modules/myapp/
+~/dotfiles/modules/myapp/
 ├── config.yaml          # Module configuration
 ├── install.sh           # Custom setup script
 └── dotfiles/            # Your dotfiles
@@ -122,5 +132,14 @@ Built with Charm's Bubbles list component for professional UX:
 
 ## Requirements
 
-- Go 1.21+
-- One of: brew, apt, pacman, yum, snap
+- Go 1.24+ (declared in `go.mod`)
+- One of: **brew** or **apt** (the only package managers currently implemented)
+
+## Documentation
+
+Deeper reference for contributors lives under [`docs/`](docs/):
+
+- [Architecture & data model](docs/architecture.md)
+- [Features](docs/features/_index.md) — install pipeline, authoring, dotfile management, export mode
+- [Conventions](docs/conventions.md) · [Runbook](docs/runbook.md)
+- `CLAUDE.md` — orientation for AI assistants working in this repo
