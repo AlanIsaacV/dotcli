@@ -62,3 +62,5 @@ testdata/
 # Go mod cache (for CI/CD environments)
 # Uncomment if you want to ignore the module cache
 # /go/pkg/mod/
+
+dotcli
